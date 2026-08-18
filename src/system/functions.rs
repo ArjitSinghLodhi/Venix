@@ -10,9 +10,10 @@ macro_rules! impl_system_for_functions {
             $( $param: SystemParam + 'static, )*
             F: Fn($($param),*) + 'static,
         {
-            fn run(&self, world: &mut World) {
+            fn run(&mut self, world: &mut World) {
+                let data = &mut self.data;
                 $(
-                    let $var = <$param>::extract(world);
+                    let $var = <$param>::extract(world, data);
                 )*
                 (self.func)($($var),*);
             }

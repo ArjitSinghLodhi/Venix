@@ -1,8 +1,7 @@
 use std::{any::TypeId, collections::HashSet};
 
 use crate::{
-    query::changed::{Changed, ChangedMarker},
-    world::archetypes::Archetype,
+    query::changed::{Changed, ChangedMarker}, system::validation::FunctionData, world::archetypes::Archetype
 };
 
 pub trait Filter {
@@ -11,9 +10,11 @@ pub trait Filter {
 
     #[inline(always)]
     fn collect_tracking(_tracked: &mut Vec<std::any::TypeId>) {}
-
-    #[inline(always)]
-    unsafe fn filter_indices(_archetype: &Archetype, _indices: &mut Vec<usize>) {}
+    unsafe fn filter_indices(
+        _archetype: &Archetype, 
+        _indices: &mut Vec<usize>, 
+        _system_data: &mut FunctionData
+    ) {}
 }
 
 pub struct With<T>(std::marker::PhantomData<T>);
@@ -57,11 +58,33 @@ impl<T: 'static + Send + Sync> Filter for Changed<T> {
         crate::query::changed::register_tracked_component::<T>();
     }
 
-    unsafe fn filter_indices(archetype: &Archetype, indices: &mut Vec<usize>) {
+    unsafe fn filter_indices(
+        archetype: &Archetype, 
+        indices: &mut Vec<usize>, 
+        system_data: &mut FunctionData
+    ) {
         let marker_ptr = unsafe { (*archetype.fetch_column_raw::<ChangedMarker<T>>()).as_ptr() };
-        indices.retain(|&idx| unsafe { (*marker_ptr.add(idx)).0 > 0 });
+        let current_generation = system_data.current_run_generation;
+        let system_last_generation = system_data.last_run_generation;
+        let previous_generation = if current_generation == 1 { 2 } else { 1 };
+
+        indices.retain(|&idx| unsafe {
+            let marker_val = (*marker_ptr.add(idx)).0;
+
+            if marker_val == 0 { return false; }
+
+            if marker_val == current_generation {
+                return system_last_generation != current_generation;
+            }
+            if marker_val == previous_generation {
+                return system_last_generation != previous_generation && system_last_generation != current_generation;
+            }
+
+            false
+        });
     }
 }
+
 
 macro_rules! impl_filter_tuple {
     ($($name:ident),*) => {
@@ -84,9 +107,9 @@ macro_rules! impl_filter_tuple {
             }
 
             #[inline]
-            unsafe fn filter_indices(archetype: &Archetype, indices: &mut Vec<usize>) {
+            unsafe fn filter_indices(archetype: &Archetype, indices: &mut Vec<usize>, systems_data: &mut FunctionData) {
                 $(
-                    unsafe { $name::filter_indices(archetype, indices); }
+                    unsafe { $name::filter_indices(archetype, indices, systems_data); }
                 )*
             }
         }

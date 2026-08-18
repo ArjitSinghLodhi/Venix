@@ -8,7 +8,7 @@ use crate::{
     entity::Entity,
     query::changed::TRACKED_COMPONENTS,
     registry::{REGISTRY, RegistryCell},
-    system::validation::{ParamAccess, SystemParam},
+    system::validation::{FunctionData, ParamAccess, SystemParam},
     world::{
         archetypes::{AnyColumn, Archetype, ArchetypeId, ComponentColumn},
         storage::World,
@@ -405,7 +405,7 @@ impl SystemParam for Commands<'_> {
         access.commands_accessed.push(TypeId::of::<Commands>());
         access
     }
-    fn extract(world: &mut World) -> Self {
+    fn extract(world: &mut World, _system_data: &mut FunctionData) -> Self {
         let ptr = &world.commands as *const CommandBuffer as *mut CommandBuffer;
         Commands {
             commands: unsafe { ptr.as_mut().unwrap() },

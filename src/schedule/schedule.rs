@@ -50,12 +50,12 @@ where
         }
     }
 
-    fn runner_fn() -> fn(&mut dyn ScheduleLabel, &mut World, &Vec<Box<dyn System>>)
+    fn runner_fn() -> fn(&mut dyn ScheduleLabel, &mut World, &mut [Box<dyn System>])
     where
         Self: Sized,
     {
         |_, world, systems| {
-            for system in systems.iter() {
+            for system in systems.iter_mut() {
                 system.run(world);
             }
         }
@@ -76,7 +76,7 @@ where
 pub(crate) struct Schedule {
     pub(crate) schedule: Box<dyn ScheduleLabel>,
     pub(crate) systems: Vec<Box<dyn System>>,
-    pub(crate) runner_fn: fn(&mut dyn ScheduleLabel, &mut World, &Vec<Box<dyn System>>),
+    pub(crate) runner_fn: fn(&mut dyn ScheduleLabel, &mut World, &mut [Box<dyn System>]),
 }
 
 impl Schedule {
@@ -89,6 +89,6 @@ impl Schedule {
     }
 
     pub fn run(&mut self, world: &mut World) {
-        (self.runner_fn)(&mut *self.schedule, world, &self.systems);
+        (self.runner_fn)(&mut *self.schedule, world, &mut self.systems);
     }
 }

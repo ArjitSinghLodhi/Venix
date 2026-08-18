@@ -199,7 +199,7 @@ impl App {
     }
 
     pub fn clear_changed_tracker(&mut self) {
-        self.world.clear_change_trackers();
+        self.world.clear_changed_tracker();
     }
 }
 

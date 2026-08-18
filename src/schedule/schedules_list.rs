@@ -11,12 +11,12 @@ impl ScheduleLabel for Startup {
         SchedulePlace::Before(First::id())
     }
 
-    fn runner_fn() -> fn(&mut dyn ScheduleLabel, &mut World, &Vec<Box<dyn System>>)
+    fn runner_fn() -> fn(&mut dyn ScheduleLabel, &mut World, &mut [Box<dyn System>])
     where
         Self: Sized,
     {
         |_, world, systems| {
-            for system in systems.iter() {
+            for system in systems.iter_mut() {
                 system.run(world);
                 world.apply_commands();
             }
@@ -54,12 +54,12 @@ impl ScheduleLabel for ApplyCommands {
     fn get_place(&self) -> SchedulePlace {
         SchedulePlace::After(CleanupHandles::id())
     }
-    fn runner_fn() -> fn(&mut dyn ScheduleLabel, &mut World, &Vec<Box<dyn System>>)
+    fn runner_fn() -> fn(&mut dyn ScheduleLabel, &mut World, &mut [Box<dyn System>])
     where
         Self: Sized,
     {
         |_, world, systems| {
-            for system in systems.iter() {
+            for system in systems.iter_mut() {
                 system.run(world);
             }
             world.apply_commands();

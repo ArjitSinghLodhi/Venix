@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 use std::any::TypeId;
 use std::sync::Mutex;
 use crate::world::archetypes::ComponentColumn;
+use crate::world::storage::CURRENT_FRAME_GENERATION;
 
 pub(crate) struct TrackedComponentMeta {
     pub(crate) component_id: TypeId,
@@ -14,7 +15,6 @@ pub(crate) struct TrackedComponentMeta {
 
 pub(crate) static TRACKED_COMPONENTS: Mutex<Vec<TrackedComponentMeta>> = Mutex::new(Vec::new());
 
-#[allow(dead_code)]
 pub(crate) fn register_tracked_component<T: 'static + Send + Sync>() {
     let mut tracked = TRACKED_COMPONENTS.lock().unwrap();
     let component_id = TypeId::of::<T>();
@@ -33,24 +33,31 @@ pub(crate) fn register_tracked_component<T: 'static + Send + Sync>() {
             },
             clear_column_markers: |raw_any| {
                 let vec = raw_any.downcast_mut::<Vec<ChangedMarker<T>>>().unwrap();
+                
+                let current_generation = CURRENT_FRAME_GENERATION.load(std::sync::atomic::Ordering::Relaxed);
+                let previous_generation = if current_generation == 1 { 2 } else { 1 };
+
                 for marker in vec.iter_mut() {
-                    marker.0 = marker.0.saturating_sub(1);
+                    if marker.0 != current_generation && marker.0 != previous_generation {
+                        marker.0 = 0;
+                    }
                 }
             },
         });
     }
 }
 
+
 #[derive(Clone, Copy)]
 pub struct ChangedMarker<T>(pub(crate) u8, pub(crate) PhantomData<T>);
 
-#[allow(dead_code)]
-pub(crate) struct Changed<T>(std::marker::PhantomData<T>);
+pub struct Changed<T>(std::marker::PhantomData<T>);
 
 pub struct Mut<'w, T> {
     pub(crate) value: *mut T,
     pub(crate) marker: *mut ChangedMarker<T>,
-    pub(crate) deref_mut_function: fn(*mut ChangedMarker<T>),
+    pub(crate) deref_mut_function: fn(*mut ChangedMarker<T>, u8),
+    pub(crate) generation: u8,
     pub(crate) _marker: std::marker::PhantomData<&'w mut T>,
 }
 
@@ -69,7 +76,7 @@ impl<'w, T> std::ops::DerefMut for Mut<'w, T> {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe {
-            (self.deref_mut_function)(self.marker);
+            (self.deref_mut_function)(self.marker, self.generation);
             &mut *self.value
         }
     }

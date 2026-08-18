@@ -1,13 +1,10 @@
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use crate::{
-    entity::Entity,
-    query::{
+    entity::Entity, query::{
         filter::{EmptyFilter, Filter},
         params::WorldQuery,
-    },
-    registry::REGISTRY,
-    world::{archetypes::Archetype, storage::World},
+    }, registry::REGISTRY, system::validation::FunctionData, world::{archetypes::Archetype, storage::World}
 };
 
 pub struct Mutable;
@@ -171,7 +168,7 @@ unsafe impl<Q: WorldQuery, F: Filter> Send for Query<Q, F> {}
 unsafe impl<Q: WorldQuery, F: Filter> Sync for Query<Q, F> {}
 
 impl<'w, Q: WorldQuery + 'w, F: Filter> Query<Q, F> {
-    pub(crate) fn new(world: &mut World) -> Self {
+    pub(crate) fn new(world: &mut World, system_data: &mut FunctionData) -> Self {
         let mut matching_archetypes = vec![None; world.archetypes.archetypes.len()];
         let mut cached_fetches = vec![None; world.archetypes.archetypes.len()];
         let mut cached_indices = vec![Vec::new(); world.archetypes.archetypes.len()];
@@ -186,7 +183,7 @@ impl<'w, Q: WorldQuery + 'w, F: Filter> Query<Q, F> {
                 let mut indices = (0..arch.entities.len()).collect::<Vec<usize>>();
 
                 unsafe {
-                    F::filter_indices(arch, &mut indices);
+                    F::filter_indices(arch, &mut indices, system_data);
                 }
 
                 cached_indices[arch_id as usize] = indices;

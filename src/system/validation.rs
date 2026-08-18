@@ -1,3 +1,5 @@
+use std::sync::atomic::Ordering;
+
 use crate::{
     query::{
         filter::Filter,
@@ -5,7 +7,7 @@ use crate::{
         query::Query,
         resources::{Res, ResMut},
     },
-    world::storage::World,
+    world::storage::{CURRENT_FRAME_GENERATION, World},
 };
 
 #[derive(Default)]
@@ -22,7 +24,7 @@ pub struct ParamAccess {
 
 pub trait SystemParam {
     fn get_access() -> ParamAccess;
-    fn extract(world: &mut World) -> Self;
+    fn extract(world: &mut World, system_data: &mut FunctionData) -> Self;
 }
 
 impl<Q: WorldQuery + 'static, F: Filter + 'static> SystemParam for Query<Q, F> {
@@ -37,17 +39,23 @@ impl<Q: WorldQuery + 'static, F: Filter + 'static> SystemParam for Query<Q, F> {
         access
     }
 
-    fn extract(world: &mut World) -> Self {
-        Query::<Q, F>::new(world)
+    fn extract(world: &mut World, system_data: &mut FunctionData) -> Self {
+        let world_gen = CURRENT_FRAME_GENERATION.load(Ordering::Relaxed);
+        if system_data.current_run_generation != world_gen {
+            system_data.last_run_generation = system_data.current_run_generation;
+            system_data.current_run_generation = world_gen;
+        }
+        Query::<Q, F>::new(world, system_data)
     }
 }
 
 pub trait System {
-    fn run(&self, world: &mut World);
+    fn run(&mut self, world: &mut World);
 }
 
 pub struct FunctionSystem<Marker, F> {
     pub func: F,
+    pub data: FunctionData,
     pub _marker: std::marker::PhantomData<Marker>,
 }
 
@@ -55,7 +63,22 @@ impl<Marker, F> FunctionSystem<Marker, F> {
     pub fn new(func: F) -> Self {
         Self {
             func,
+            data: FunctionData::new(),
             _marker: std::marker::PhantomData,
+        }
+    }
+}
+
+pub struct FunctionData {
+    pub(crate) last_run_generation: u8,
+    pub(crate) current_run_generation: u8,
+}
+
+impl FunctionData {
+    pub fn new() -> Self {
+        Self {
+            last_run_generation: 0,
+            current_run_generation: 0,
         }
     }
 }
@@ -110,7 +133,7 @@ impl<T: 'static> SystemParam for Res<T> {
         access
     }
 
-    fn extract(world: &mut World) -> Self {
+    fn extract(world: &mut World, _system_data: &mut FunctionData) -> Self {
         unsafe { Self::new(world) }
     }
 }
@@ -124,7 +147,7 @@ impl<T: 'static> SystemParam for ResMut<T> {
         access
     }
 
-    fn extract(world: &mut World) -> Self {
+    fn extract(world: &mut World, _system_data: &mut FunctionData) -> Self {
         unsafe { Self::new(world) }
     }
 }

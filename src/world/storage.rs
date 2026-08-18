@@ -1,6 +1,6 @@
 use std::{
     any::{TypeId, type_name},
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet}, sync::atomic::{AtomicU8, Ordering},
 };
 
 use crate::{
@@ -10,6 +10,7 @@ use crate::{
     world::archetypes::{ArchetypeId, ArchetypeManager},
 };
 
+pub(crate) static CURRENT_FRAME_GENERATION: AtomicU8 = AtomicU8::new(1);
 pub struct World {
     pub(crate) archetypes: ArchetypeManager,
     pub(crate) resources: HashMap<std::any::TypeId, std::cell::UnsafeCell<Box<dyn std::any::Any>>>,
@@ -110,20 +111,24 @@ impl World {
         }
         commands.pending_despawns = despawn_targets_queue;
     }
-    pub fn clear_change_trackers(&mut self) {
-        let tracked = TRACKED_COMPONENTS.lock().unwrap();
+pub fn clear_changed_tracker(&mut self) {
+    let current = CURRENT_FRAME_GENERATION.load(Ordering::Relaxed);
+    let next = if current == 1 { 2 } else { 1 };
+    CURRENT_FRAME_GENERATION.store(next, Ordering::Relaxed);
+    let tracked = TRACKED_COMPONENTS.lock().unwrap();
 
-        for archetype in self.archetypes.archetypes.values_mut() {
-            unsafe {
-                let columns = &mut *archetype.columns.get();
+    for archetype in self.archetypes.archetypes.values_mut() {
+        unsafe {
+            let columns = &mut *archetype.columns.get();
 
-                for meta in tracked.iter() {
-                    if let Some(marker_column) = columns.get_mut(&meta.marker_id) {
-                        let raw_any = marker_column.data.as_any_mut();
-                        (meta.clear_column_markers)(raw_any);
-                    }
+            for meta in tracked.iter() {
+                if let Some(marker_column) = columns.get_mut(&meta.marker_id) {
+                    let raw_any = marker_column.data.as_any_mut();
+                    (meta.clear_column_markers)(raw_any);
                 }
             }
         }
     }
+}
+
 }

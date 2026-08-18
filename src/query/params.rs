@@ -1,9 +1,9 @@
-use std::{any::TypeId, collections::HashSet};
+use std::{any::TypeId, collections::HashSet, sync::atomic::Ordering};
 
 use crate::{
     entity::Entity,
     query::changed::{ChangedMarker, Mut},
-    world::archetypes::Archetype,
+    world::{archetypes::Archetype, storage::CURRENT_FRAME_GENERATION},
 };
 
 pub trait WorldQuery {
@@ -39,11 +39,10 @@ impl<T: 'static> WorldQuery for &T {
         unsafe { &*fetch.add(index) }
     }
 }
-
 impl<T: 'static + Send + Sync> WorldQuery for &mut T {
     type Item<'w> = Mut<'w, T>;
     type ReadOnlyItem<'w> = &'w T;
-    type Fetch = (*mut T, *mut ChangedMarker<T>, fn(*mut ChangedMarker<T>));
+    type Fetch = (*mut T, *mut ChangedMarker<T>, u8, fn(*mut ChangedMarker<T>, generation: u8));
 
     fn matches(types: &HashSet<TypeId>) -> bool {
         types.contains(&TypeId::of::<T>())
@@ -52,9 +51,9 @@ impl<T: 'static + Send + Sync> WorldQuery for &mut T {
     unsafe fn init_fetch(archetype: &Archetype) -> Self::Fetch {
         unsafe {
             let data_ptr = (*archetype.fetch_column_raw::<T>()).as_mut_ptr();
-
             let columns = &mut *archetype.columns.get();
             let marker_id = TypeId::of::<ChangedMarker<T>>();
+            let current_generation = CURRENT_FRAME_GENERATION.load(Ordering::Relaxed);
 
             if let Some(column) = columns.get_mut(&marker_id) {
                 let vec_ptr = column
@@ -62,9 +61,10 @@ impl<T: 'static + Send + Sync> WorldQuery for &mut T {
                     .as_any_mut()
                     .downcast_mut::<Vec<ChangedMarker<T>>>()
                     .unwrap();
-                (data_ptr, vec_ptr.as_mut_ptr(), |m| (*m).0 = 2)
+                
+                (data_ptr, vec_ptr.as_mut_ptr(), current_generation,|m, g| (*m).0 = g)
             } else {
-                (data_ptr,  std::ptr::null_mut(), |_| {})
+                (data_ptr, std::ptr::null_mut(), current_generation, |_, _| {})
             }
         }
     }
@@ -72,12 +72,11 @@ impl<T: 'static + Send + Sync> WorldQuery for &mut T {
     #[inline(always)]
     unsafe fn fetch_mut<'w>(fetch: Self::Fetch, index: usize) -> Self::Item<'w> {
         unsafe {
-            let marker_offset = index;
-
             Mut {
                 value: fetch.0.add(index),
-                marker: fetch.1.add(marker_offset),
-                deref_mut_function: fetch.2,
+                marker: fetch.1.add(index),
+                deref_mut_function: fetch.3,
+                generation: fetch.2,
                 _marker: std::marker::PhantomData,
             }
         }
@@ -92,6 +91,7 @@ impl<T: 'static + Send + Sync> WorldQuery for &mut T {
         writes.push(TypeId::of::<ChangedMarker<T>>());
     }
 }
+
 
 impl WorldQuery for Entity {
     type Item<'w> = &'w Entity;
@@ -154,7 +154,7 @@ impl<T: 'static> WorldQuery for Option<&T> {
 impl<T: 'static + Send + Sync> WorldQuery for Option<&mut T> {
     type Item<'w> = Option<Mut<'w, T>>;
     type ReadOnlyItem<'w> = Option<&'w T>;
-    type Fetch = (Option<*mut T>, *mut ChangedMarker<T>, fn(*mut ChangedMarker<T>));
+    type Fetch = (Option<*mut T>, *mut ChangedMarker<T>, u8, fn(*mut ChangedMarker<T>, u8));
 
     fn matches(_types: &HashSet<TypeId>) -> bool {
         true
@@ -170,6 +170,8 @@ impl<T: 'static + Send + Sync> WorldQuery for Option<&mut T> {
             let columns = &mut *archetype.columns.get();
             let component_id = TypeId::of::<T>();
             let marker_id = TypeId::of::<ChangedMarker<T>>();
+            
+            let current_generation = CURRENT_FRAME_GENERATION.load(Ordering::Relaxed);
 
             if columns.contains_key(&component_id) {
                 let data_ptr = (*archetype.fetch_column_raw::<T>()).as_mut_ptr();
@@ -180,12 +182,15 @@ impl<T: 'static + Send + Sync> WorldQuery for Option<&mut T> {
                         .as_any_mut()
                         .downcast_mut::<Vec<ChangedMarker<T>>>()
                         .unwrap();
-                    (Some(data_ptr), vec_ptr.as_mut_ptr(), |m| {(*m).0 = 2})
+                    
+                    (Some(data_ptr), vec_ptr.as_mut_ptr(), current_generation, |m, g| {
+                        (*m).0 = g;
+                    })
                 } else {
-                    (Some(data_ptr), std::ptr::null_mut(), |_| {})
+                    (Some(data_ptr), std::ptr::null_mut(), current_generation, |_, _| {})
                 }
             } else {
-                (None, std::ptr::null_mut(), |_| {})
+                (None, std::ptr::null_mut(), current_generation, |_, _| {})
             }
         }
     }
@@ -194,11 +199,11 @@ impl<T: 'static + Send + Sync> WorldQuery for Option<&mut T> {
     unsafe fn fetch_mut<'w>(fetch: Self::Fetch, index: usize) -> Self::Item<'w> {
         unsafe {
             if let Some(data_head) = fetch.0 {
-                let marker_offset = index;
                 Some(Mut {
                     value: data_head.add(index),
-                    marker: fetch.1.add(marker_offset),
-                    deref_mut_function: fetch.2,
+                    marker: fetch.1.add(index),
+                    deref_mut_function: fetch.3,
+                    generation: fetch.2,
                     _marker: std::marker::PhantomData,
                 })
             } else {
@@ -218,6 +223,7 @@ impl<T: 'static + Send + Sync> WorldQuery for Option<&mut T> {
         }
     }
 }
+
 
 macro_rules! impl_world_query_tuple {
     ($($name:ident -> $idx:tt),*) => {

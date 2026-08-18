@@ -76,7 +76,7 @@ fn movement_system(
     println!("database: {:?}", database.data);
 }
 
-fn render_system(query: Query<&Position>) {
+fn render_system(query: Query<&Position, (Changed<Position>, With<Velocity>, Changed<Velocity>)>) {
     println!("--- Frame Render Output ---");
     for chunk in query.iter() {
         for pos in chunk.iter() {
