@@ -1,6 +1,7 @@
 use std::{
     any::{TypeId, type_name},
-    collections::{HashMap, HashSet}, sync::atomic::{AtomicU8, Ordering},
+    collections::{HashMap, HashSet},
+    sync::atomic::{AtomicU8, Ordering},
 };
 
 use crate::{
@@ -98,37 +99,36 @@ impl World {
         let commands = unsafe { commands_ptr.as_mut().unwrap() };
         let registry_ptr = std::ptr::addr_of_mut!(REGISTRY);
         let vec = &mut unsafe { &mut *registry_ptr }.0;
-        for target in commands.pending_despawns.iter() {
-            vec[target.entity.registry_index as usize]
-                .handle_count
-                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-        }
         commands.queue.apply(self);
         self.free_indices_list.sort_by(|a, b| b.cmp(a));
         let mut despawn_targets_queue = std::mem::take(&mut commands.pending_despawns);
+        for target in despawn_targets_queue.iter() {
+            vec[target.entity.registry_index as usize]
+                .handle_count
+                .fetch_sub(1, Ordering::Relaxed);
+        }
         for despawn_target in despawn_targets_queue.drain() {
             despawn_target.apply(self);
         }
         commands.pending_despawns = despawn_targets_queue;
     }
-pub fn clear_changed_tracker(&mut self) {
-    let current = CURRENT_FRAME_GENERATION.load(Ordering::Relaxed);
-    let next = if current == 1 { 2 } else { 1 };
-    CURRENT_FRAME_GENERATION.store(next, Ordering::Relaxed);
-    let tracked = TRACKED_COMPONENTS.lock().unwrap();
+    pub fn clear_changed_tracker(&mut self) {
+        let current = CURRENT_FRAME_GENERATION.load(Ordering::Relaxed);
+        let next = if current == 1 { 2 } else { 1 };
+        CURRENT_FRAME_GENERATION.store(next, Ordering::Relaxed);
+        let tracked = TRACKED_COMPONENTS.get().unwrap();
 
-    for archetype in self.archetypes.archetypes.values_mut() {
-        unsafe {
-            let columns = &mut *archetype.columns.get();
+        for archetype in self.archetypes.archetypes.values_mut() {
+            unsafe {
+                let columns = &mut *archetype.columns.get();
 
-            for meta in tracked.iter() {
-                if let Some(marker_column) = columns.get_mut(&meta.marker_id) {
-                    let raw_any = marker_column.data.as_any_mut();
-                    (meta.clear_column_markers)(raw_any);
+                for meta in tracked.iter() {
+                    if let Some(marker_column) = columns.get_mut(&meta.marker_id) {
+                        let raw_any = marker_column.data.as_any_mut();
+                        (meta.clear_column_markers)(raw_any);
+                    }
                 }
             }
         }
     }
-}
-
 }

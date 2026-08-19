@@ -1,10 +1,14 @@
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use crate::{
-    entity::Entity, query::{
+    entity::Entity,
+    query::{
         filter::{EmptyFilter, Filter},
         params::WorldQuery,
-    }, registry::REGISTRY, system::validation::FunctionData, world::{archetypes::Archetype, storage::World}
+    },
+    registry::REGISTRY,
+    system::validation::FunctionData,
+    world::{archetypes::Archetype, storage::World},
 };
 
 pub struct Mutable;
@@ -177,15 +181,10 @@ impl<'w, Q: WorldQuery + 'w, F: Filter> Query<Q, F> {
             let arch_id = arch.id();
             if Q::matches(&arch.types) && F::matches(&arch.types) {
                 matching_archetypes[arch_id as usize] = Some(arch as *const Archetype);
-
                 let fetch = unsafe { Q::init_fetch(arch) };
                 cached_fetches[arch_id as usize] = Some(fetch);
                 let mut indices = (0..arch.entities.len()).collect::<Vec<usize>>();
-
-                unsafe {
-                    F::filter_indices(arch, &mut indices, system_data);
-                }
-
+                F::filter_indices(arch, &mut indices, system_data);
                 cached_indices[arch_id as usize] = indices;
             }
         }

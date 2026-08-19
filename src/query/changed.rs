@@ -1,10 +1,11 @@
 use std::marker::PhantomData;
 
-use std::any::TypeId;
-use std::sync::Mutex;
 use crate::world::archetypes::ComponentColumn;
 use crate::world::storage::CURRENT_FRAME_GENERATION;
+use std::any::TypeId;
+use std::sync::OnceLock;
 
+#[derive(Debug)]
 pub(crate) struct TrackedComponentMeta {
     pub(crate) component_id: TypeId,
     pub(crate) marker_id: TypeId,
@@ -13,10 +14,13 @@ pub(crate) struct TrackedComponentMeta {
     pub(crate) clear_column_markers: unsafe fn(&mut dyn std::any::Any),
 }
 
-pub(crate) static TRACKED_COMPONENTS: Mutex<Vec<TrackedComponentMeta>> = Mutex::new(Vec::new());
+pub(crate) static TRACKED_COMPONENTS: OnceLock<Vec<TrackedComponentMeta>> = OnceLock::new();
 
 pub(crate) fn register_tracked_component<T: 'static + Send + Sync>() {
-    let mut tracked = TRACKED_COMPONENTS.lock().unwrap();
+    let static_ptr = &TRACKED_COMPONENTS as *const OnceLock<Vec<TrackedComponentMeta>>
+        as *mut OnceLock<Vec<TrackedComponentMeta>>;
+    let tracked = unsafe { (*static_ptr).get_mut().unwrap() };
+
     let component_id = TypeId::of::<T>();
 
     if !tracked.iter().any(|m| m.component_id == component_id) {
@@ -33,8 +37,9 @@ pub(crate) fn register_tracked_component<T: 'static + Send + Sync>() {
             },
             clear_column_markers: |raw_any| {
                 let vec = raw_any.downcast_mut::<Vec<ChangedMarker<T>>>().unwrap();
-                
-                let current_generation = CURRENT_FRAME_GENERATION.load(std::sync::atomic::Ordering::Relaxed);
+
+                let current_generation =
+                    CURRENT_FRAME_GENERATION.load(std::sync::atomic::Ordering::Relaxed);
                 let previous_generation = if current_generation == 1 { 2 } else { 1 };
 
                 for marker in vec.iter_mut() {
@@ -46,7 +51,6 @@ pub(crate) fn register_tracked_component<T: 'static + Send + Sync>() {
         });
     }
 }
-
 
 #[derive(Clone, Copy)]
 pub struct ChangedMarker<T>(pub(crate) u8, pub(crate) PhantomData<T>);
@@ -86,4 +90,9 @@ impl<'w, T: std::fmt::Debug> std::fmt::Debug for Mut<'w, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         unsafe { std::fmt::Debug::fmt(&*self.value, f) }
     }
+}
+
+pub(crate) fn no_op_mut<T>(_marker: *mut ChangedMarker<T>, _generation: u8) {}
+pub(crate) fn changed_marker_modify<T>(marker: *mut ChangedMarker<T>, generation: u8) {
+    (unsafe { &mut *marker }).0 = generation;
 }

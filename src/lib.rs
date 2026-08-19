@@ -15,6 +15,7 @@ pub mod prelude {
     pub use crate::commands::commands::Commands;
     pub use crate::entity::Entity;
     pub use crate::query::changed::Changed;
+    pub use crate::query::ergonomic_params::*;
     pub use crate::query::filter::*;
     pub use crate::query::query::*;
     pub use crate::query::resources::*;

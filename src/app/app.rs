@@ -82,6 +82,7 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
+        crate::query::changed::TRACKED_COMPONENTS.get_or_init(Vec::new);
         let mut schedules = Vec::new();
         schedules.push(Schedule::new(Startup));
         let function = |app: &mut App| {

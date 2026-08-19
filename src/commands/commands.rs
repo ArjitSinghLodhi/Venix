@@ -123,7 +123,7 @@ impl<T: ComponentTuple> WorldCommand for SpawnCommand<T> {
         self.components.push_to_archetype(arch);
         unsafe {
             let columns = &mut *arch.columns.get();
-            let tracked = TRACKED_COMPONENTS.lock().unwrap();
+            let tracked = TRACKED_COMPONENTS.get().unwrap();
 
             for meta in tracked.iter() {
                 if let Some(marker_column) = columns.get_mut(&meta.marker_id) {
@@ -149,11 +149,7 @@ impl DespawnCommand {
             let cell = &vec[target_registry_idx];
 
             if cell.handle_count.load(std::sync::atomic::Ordering::Relaxed) > 0 {
-                let types_names = &world
-                    .archetypes
-                    .get(cell.archetype_id)
-                    .unwrap()
-                    .type_names;
+                let types_names = &world.archetypes.get(cell.archetype_id).unwrap().type_names;
                 panic!(
                     "Safety Violation: Attempted to despawn an Entity while active handles are still held! of archetype:\n{:?}",
                     types_names
@@ -271,9 +267,17 @@ impl<T: ComponentTuple> WorldCommand for AddComponentsCommand<T> {
                     old_col.data.move_row_erased(old_idx as usize, dst_ptr);
                 }
             }
+            let columns = &mut *new_arch.columns.get();
+            let tracked = TRACKED_COMPONENTS.get().unwrap();
 
             self.components.push_to_archetype(new_arch);
-
+            for meta in tracked.iter() {
+                if incoming_ids.contains(&meta.marker_id) {
+                    if let Some(marker_column) = columns.get_mut(&meta.marker_id) {
+                        (meta.push_default_marker)(marker_column);
+                    }
+                }
+            }
             let last_idx = (old_arch.entities.len() - 1) as u32;
             if old_idx != last_idx {
                 let swapped_entity_registry_idx =
@@ -371,12 +375,18 @@ impl<T: ComponentTuple> WorldCommand for RemoveComponentsCommand<T> {
                 }
             }
 
+            let tracked = TRACKED_COMPONENTS.get().unwrap();
+
             for id in removed_ids {
                 if let Some(old_col) = old_cols.get_mut(id) {
                     old_col.data.swap_remove_erased(old_idx as usize);
                 }
+                if let Some(meta) = tracked.iter().find(|m| m.marker_id == *id) {
+                    if let Some(marker_col) = old_cols.get_mut(&meta.marker_id) {
+                        marker_col.data.swap_remove_erased(old_idx as usize);
+                    }
+                }
             }
-
             let last_idx = (old_arch.entities.len() - 1) as u32;
             if old_idx != last_idx {
                 let swapped_entity_registry_idx =

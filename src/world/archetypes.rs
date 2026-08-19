@@ -246,7 +246,7 @@ impl ArchetypeManager {
         let mut columns = HashMap::new();
         T::create_empty_columns(&mut columns);
         {
-            let tracked = TRACKED_COMPONENTS.lock().unwrap();
+            let tracked = TRACKED_COMPONENTS.get().unwrap();
             let mut injections = Vec::new();
 
             for meta in tracked.iter() {
