@@ -1,6 +1,6 @@
 [package]
 name = "venix"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 description = "A high-performance, archetype-based ECS engine written in Rust."
 readme = "README.md"
@@ -11,6 +11,7 @@ categories = ["game-engines", "development-tools"]
 
 [dependencies]
 rayon = "1.12.0"
+rusty-fork = "0.3.1"
 
 [lib]
 name = "venix"

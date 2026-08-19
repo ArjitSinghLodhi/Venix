@@ -1,17 +1,21 @@
 use std::{any::TypeId, collections::HashSet};
 
 use crate::{
-    query::changed::{Changed, ChangedMarker},
+    query::ergonomic_params::{AnyOf, Or},
     system::validation::FunctionData,
     world::archetypes::Archetype,
 };
 
+pub trait StructuralFilter: Filter {}
+
+impl<T: Filter + 'static> StructuralFilter for With<T> {}
+impl<T: Filter + 'static> StructuralFilter for Without<T> {}
+impl<A: Filter + StructuralFilter, B: Filter + StructuralFilter> StructuralFilter for Or<A, B> {}
+impl<T: Filter> StructuralFilter for AnyOf<T> where AnyOf<T>: Filter {}
+
 pub trait Filter {
     fn matches(types: &HashSet<TypeId>) -> bool;
     fn collect_filter(withs: &mut Vec<std::any::TypeId>, withouts: &mut Vec<std::any::TypeId>);
-
-    #[inline(always)]
-    fn collect_tracking(_tracked: &mut Vec<std::any::TypeId>) {}
     fn filter_indices(
         _archetype: &Archetype,
         _indices: &mut Vec<usize>,
@@ -46,51 +50,6 @@ impl Filter for EmptyFilter {
     fn collect_filter(_withs: &mut Vec<TypeId>, _withouts: &mut Vec<TypeId>) {}
 }
 
-impl<T: 'static + Send + Sync> Filter for Changed<T> {
-    fn matches(types: &HashSet<TypeId>) -> bool {
-        types.contains(&TypeId::of::<T>()) && types.contains(&TypeId::of::<ChangedMarker<T>>())
-    }
-
-    fn collect_filter(withs: &mut Vec<TypeId>, _withouts: &mut Vec<TypeId>) {
-        withs.push(TypeId::of::<ChangedMarker<T>>());
-    }
-
-    #[inline(always)]
-    fn collect_tracking(tracked: &mut Vec<std::any::TypeId>) {
-        tracked.push(std::any::TypeId::of::<T>());
-        crate::query::changed::register_tracked_component::<T>();
-    }
-
-    fn filter_indices(
-        archetype: &Archetype,
-        indices: &mut Vec<usize>,
-        system_data: &mut FunctionData,
-    ) {
-        let marker_ptr = unsafe { (*archetype.fetch_column_raw::<ChangedMarker<T>>()).as_ptr() };
-        let current_generation = system_data.current_run_generation;
-        let system_last_generation = system_data.last_run_generation;
-        let previous_generation = if current_generation == 1 { 2 } else { 1 };
-
-        indices.retain(|&idx| unsafe {
-            let marker_val = (*marker_ptr.add(idx)).0;
-
-            if marker_val == 0 {
-                return false;
-            }
-
-            if marker_val == current_generation {
-                return system_last_generation != current_generation;
-            }
-            if marker_val == previous_generation {
-                return system_last_generation != previous_generation
-                    && system_last_generation != current_generation;
-            }
-
-            false
-        });
-    }
-}
-
 macro_rules! impl_filter_tuple {
     ($($name:ident),*) => {
         impl<$($name: Filter),*> Filter for ($($name,)*) {
@@ -103,11 +62,6 @@ macro_rules! impl_filter_tuple {
             fn collect_filter(withs: &mut Vec<TypeId>, withouts: &mut Vec<TypeId>) {
                 $(
                     $name::collect_filter(withs, withouts);
-                )*
-            }
-            fn collect_tracking(tracked: &mut Vec<TypeId>) {
-                $(
-                    $name::collect_tracking(tracked);
                 )*
             }
 

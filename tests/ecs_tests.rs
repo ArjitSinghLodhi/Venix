@@ -1,3 +1,4 @@
+use rusty_fork::rusty_fork_test;
 use venix::prelude::*;
 
 pub struct Position {
@@ -47,16 +48,18 @@ fn verify_resource_and_commands(tracker: Res<ScoreTracker>, query: Query<&Positi
     assert!(found);
 }
 
-#[test]
-fn test_commands_and_resources() {
-    let mut app = App::new();
-    app.add_plugins(DefaultSchedulesPlugin)
-        .insert_resource(ScoreTracker { points: 0 })
-        .add_systems(Startup::id(), setup_initial_entities)
-        .add_systems(Update::id(), verify_resource_and_commands);
+rusty_fork_test! {
+    #[test]
+    fn test_commands_and_resources() {
+        let mut app = App::new();
+        app.add_plugins(DefaultSchedulesPlugin)
+            .insert_resource(ScoreTracker { points: 0 })
+            .add_systems(Startup::id(), setup_initial_entities)
+            .add_systems(Update::id(), verify_resource_and_commands);
 
-    app.set_runner(test_runner_once);
-    app.run();
+        app.set_runner(test_runner_once);
+        app.run();
+    }
 }
 
 fn spawn_filter_targets(mut commands: Commands) {
@@ -121,18 +124,20 @@ fn verify_change_tracking(query: Query<&Position, Changed<Position>>) {
     assert!(change_detected);
 }
 
-#[test]
-fn test_changed_generational_tracking() {
-    let mut app = App::new();
-    app.add_plugins(DefaultSchedulesPlugin)
-        .add_systems(Startup::id(), spawn_tracking_entity)
-        .add_systems(
-            Update::id(),
-            (modify_component_system, verify_change_tracking),
-        );
+rusty_fork_test! {
+    #[test]
+    fn test_changed_generational_tracking() {
+        let mut app = App::new();
+        app.add_plugins(DefaultSchedulesPlugin)
+            .add_systems(Startup::id(), spawn_tracking_entity)
+            .add_systems(
+                Update::id(),
+                (modify_component_system, verify_change_tracking),
+            );
 
-    app.set_runner(test_runner_once);
-    app.run();
+        app.set_runner(test_runner_once);
+        app.run();
+    }
 }
 
 pub struct FrameCounter {
@@ -201,17 +206,19 @@ fn test_runner_three_frames(app: &mut App) {
     app.update();
 }
 
-#[test]
-fn test_multi_frame_lifecycle_and_stagnation() {
-    let mut app = App::new();
-    app.add_plugins(DefaultSchedulesPlugin)
-        .insert_resource(FrameCounter { current_frame: 0 })
-        .add_systems(Startup::id(), setup_multi_frame_entity)
-        .add_systems(
-            Update::id(),
-            (increment_frame_system, verify_multi_frame_tracking),
-        );
+rusty_fork_test! {
+    #[test]
+    fn test_multi_frame_lifecycle_and_stagnation() {
+        let mut app = App::new();
+        app.add_plugins(DefaultSchedulesPlugin)
+            .insert_resource(FrameCounter { current_frame: 0 })
+            .add_systems(Startup::id(), setup_multi_frame_entity)
+            .add_systems(
+                Update::id(),
+                (increment_frame_system, verify_multi_frame_tracking),
+            );
 
-    app.set_runner(test_runner_three_frames);
-    app.run();
+        app.set_runner(test_runner_three_frames);
+        app.run();
+    }
 }

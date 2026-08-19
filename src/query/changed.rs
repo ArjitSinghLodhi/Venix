@@ -1,6 +1,9 @@
+use std::collections::HashSet;
 use std::marker::PhantomData;
 
-use crate::world::archetypes::ComponentColumn;
+use crate::query::filter::Filter;
+use crate::system::validation::FunctionData;
+use crate::world::archetypes::{Archetype, ComponentColumn};
 use crate::world::storage::CURRENT_FRAME_GENERATION;
 use std::any::TypeId;
 use std::sync::OnceLock;
@@ -57,6 +60,38 @@ pub struct ChangedMarker<T>(pub(crate) u8, pub(crate) PhantomData<T>);
 
 pub struct Changed<T>(std::marker::PhantomData<T>);
 
+impl<T: 'static + Send + Sync> Filter for Changed<T> {
+    fn matches(types: &HashSet<TypeId>) -> bool {
+        types.contains(&TypeId::of::<T>()) && types.contains(&TypeId::of::<ChangedMarker<T>>())
+    }
+
+    fn collect_filter(withs: &mut Vec<TypeId>, _withouts: &mut Vec<TypeId>) {
+        withs.push(TypeId::of::<ChangedMarker<T>>());
+        register_tracked_component::<T>();
+    }
+
+    fn filter_indices(
+        archetype: &Archetype,
+        indices: &mut Vec<usize>,
+        system_data: &mut FunctionData,
+    ) {
+        let marker_ptr = unsafe { (*archetype.fetch_column_raw::<ChangedMarker<T>>()).as_ptr() };
+        let current_generation = system_data.current_run_generation;
+        let system_last_generation = system_data.last_run_generation;
+        let previous_generation = if current_generation == 1 { 2 } else { 1 };
+
+        indices.retain(|&idx| {
+            detect_changed(
+                idx,
+                marker_ptr,
+                current_generation,
+                system_last_generation,
+                previous_generation,
+            )
+        });
+    }
+}
+
 pub struct Mut<'w, T> {
     pub(crate) value: *mut T,
     pub(crate) marker: *mut ChangedMarker<T>,
@@ -95,4 +130,28 @@ impl<'w, T: std::fmt::Debug> std::fmt::Debug for Mut<'w, T> {
 pub(crate) fn no_op_mut<T>(_marker: *mut ChangedMarker<T>, _generation: u8) {}
 pub(crate) fn changed_marker_modify<T>(marker: *mut ChangedMarker<T>, generation: u8) {
     (unsafe { &mut *marker }).0 = generation;
+}
+
+fn detect_changed<T>(
+    idx: usize,
+    marker_ptr: *const ChangedMarker<T>,
+    current_generation: u8,
+    system_last_generation: u8,
+    previous_generation: u8,
+) -> bool {
+    let marker_val = unsafe { (*marker_ptr.add(idx)).0 };
+
+    if marker_val == 0 {
+        return false;
+    }
+
+    if marker_val == current_generation {
+        return system_last_generation != current_generation;
+    }
+    if marker_val == previous_generation {
+        return system_last_generation != previous_generation
+            && system_last_generation != current_generation;
+    }
+
+    false
 }

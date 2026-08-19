@@ -34,8 +34,6 @@ impl<Q: WorldQuery + 'static, F: Filter + 'static> SystemParam for Query<Q, F> {
         };
         Q::collect_access(&mut access.reads, &mut access.writes);
         F::collect_filter(&mut access.with_filters, &mut access.without_filters);
-        F::collect_tracking(&mut access.tracked_components);
-
         access
     }
 
