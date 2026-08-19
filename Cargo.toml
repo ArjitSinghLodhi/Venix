@@ -2,6 +2,11 @@
 name = "venix"
 version = "1.0.0"
 edition = "2024"
+description = "A high-performance, archetype-based ECS engine written in Rust."
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+keywords = ["ecs", "archetype", "simulation", "parallel"]
+categories = ["game-engines", "development-tools"]
 
 [dependencies]
 rayon = "1.12.0"
