@@ -60,7 +60,7 @@ impl<A: Filter, B: Filter> Filter for Or<A, B> {
         system_data: &mut crate::system::validation::FunctionData,
     ) {
         A::filter_indices(archetype, indices, system_data);
-        A::filter_indices(archetype, indices, system_data);
+        B::filter_indices(archetype, indices, system_data);
     }
 }
 
