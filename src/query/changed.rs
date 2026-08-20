@@ -78,17 +78,18 @@ impl<T> ChangedTracker<T> {
     }
 }
 
-impl<T: 'static> WorldQuery for ChangedTracker<T> {
+impl<T: 'static + Send + Sync> WorldQuery for ChangedTracker<T> {
     type Item<'w> = ChangedTracker<T>;
     type ReadOnlyItem<'w> = ChangedTracker<T>;
     type Fetch = (u8, u8, u8, *const ChangedMarker<T>);
 
     fn matches(types: &HashSet<TypeId>) -> bool {
-        types.contains(&TypeId::of::<ChangedMarker<T>>())
+        types.contains(&TypeId::of::<T>())
     }
 
     fn collect_access(reads: &mut Vec<std::any::TypeId>, _writes: &mut Vec<std::any::TypeId>) {
         reads.push(TypeId::of::<ChangedMarker<T>>());
+        register_tracked_component::<T>();
     }
     unsafe fn init_fetch(archetype: &Archetype, data: &mut FunctionData) -> Self::Fetch {
         let marker_ptr = unsafe { (*archetype.fetch_column_raw::<ChangedMarker<T>>()).as_ptr() };
@@ -124,7 +125,7 @@ pub struct Changed<T>(std::marker::PhantomData<T>);
 
 impl<T: 'static + Send + Sync> Filter for Changed<T> {
     fn matches(types: &HashSet<TypeId>) -> bool {
-        types.contains(&TypeId::of::<T>()) && types.contains(&TypeId::of::<ChangedMarker<T>>())
+        types.contains(&TypeId::of::<T>())
     }
     fn collect_filter(withs: &mut Vec<TypeId>, _withouts: &mut Vec<TypeId>) {
         withs.push(TypeId::of::<ChangedMarker<T>>());

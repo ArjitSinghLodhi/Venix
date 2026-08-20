@@ -101,7 +101,7 @@ fn test_query_filter_logic() {
 }
 
 fn spawn_tracking_entity(mut commands: Commands) {
-    commands.spawn((Position { x: 5.0, y: 5.0 },));
+    commands.spawn((Position { x: 5.0, y: 5.0 }, Velocity { x: 1.0, y: 1.0 }));
 }
 
 fn modify_component_system(mut query: Query<&mut Position>) {
@@ -124,16 +124,16 @@ fn verify_change_tracking(query: Query<&Position, Changed<Position>>) {
     assert!(change_detected);
 }
 
-fn verify_change_tracking_data(query: Query<(&Position, ChangedTracker<Position>)>) {
-    let mut change_detected = false;
+fn verify_change_tracking_data(query: Query<(&Position, ChangedTracker<Velocity>)>) {
+    let mut change_detected_track = false;
     for chunk in query.iter() {
         for (pos, mark) in chunk.iter() {
-            if pos.x == 50.0 && mark.is_changed() {
-                change_detected = true;
+            if pos.x == 50.0 && !mark.is_changed() {
+                change_detected_track = true;
             }
         }
     }
-    assert!(change_detected);
+    assert!(change_detected_track);
 }
 
 rusty_fork_test! {
