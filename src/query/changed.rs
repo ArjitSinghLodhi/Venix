@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::marker::PhantomData;
 
 use crate::query::filter::Filter;
+use crate::query::params::WorldQuery;
 use crate::system::validation::FunctionData;
 use crate::world::archetypes::{Archetype, ComponentColumn};
 use crate::world::storage::CURRENT_FRAME_GENERATION;
@@ -58,13 +59,73 @@ pub(crate) fn register_tracked_component<T: 'static + Send + Sync>() {
 #[derive(Clone, Copy)]
 pub struct ChangedMarker<T>(pub(crate) u8, pub(crate) PhantomData<T>);
 
+pub struct ChangedTracker<T> {
+    system_last_generation: u8,
+    previous_generation: u8,
+    current_generation: u8,
+    marker_val: u8,
+    _marker: PhantomData<T>,
+}
+
+impl<T> ChangedTracker<T> {
+    pub fn is_changed(&self) -> bool {
+        detect_changed::<T>(
+            self.marker_val,
+            self.current_generation,
+            self.system_last_generation,
+            self.previous_generation,
+        )
+    }
+}
+
+impl<T: 'static> WorldQuery for ChangedTracker<T> {
+    type Item<'w> = ChangedTracker<T>;
+    type ReadOnlyItem<'w> = ChangedTracker<T>;
+    type Fetch = (u8, u8, u8, *const ChangedMarker<T>);
+
+    fn matches(types: &HashSet<TypeId>) -> bool {
+        types.contains(&TypeId::of::<ChangedMarker<T>>())
+    }
+
+    fn collect_access(reads: &mut Vec<std::any::TypeId>, _writes: &mut Vec<std::any::TypeId>) {
+        reads.push(TypeId::of::<ChangedMarker<T>>());
+    }
+    unsafe fn init_fetch(archetype: &Archetype, data: &mut FunctionData) -> Self::Fetch {
+        let marker_ptr = unsafe { (*archetype.fetch_column_raw::<ChangedMarker<T>>()).as_ptr() };
+        let sys_last_gen = data.last_run_generation;
+        let current_gen = data.current_run_generation;
+        let previous_generation = if current_gen == 1 { 2 } else { 1 };
+        (sys_last_gen, previous_generation, current_gen, marker_ptr)
+    }
+    unsafe fn fetch_read_only<'w>(fetch: Self::Fetch, index: usize) -> Self::ReadOnlyItem<'w> {
+        let marker_ref = unsafe { &(*fetch.3.add(index)) };
+        ChangedTracker {
+            system_last_generation: fetch.1,
+            previous_generation: fetch.1,
+            current_generation: fetch.2,
+            marker_val: marker_ref.0,
+            _marker: PhantomData,
+        }
+    }
+
+    unsafe fn fetch_mut<'w>(fetch: Self::Fetch, index: usize) -> Self::Item<'w> {
+        let marker_ref = unsafe { &(*fetch.3.add(index)) };
+        ChangedTracker {
+            system_last_generation: fetch.1,
+            previous_generation: fetch.1,
+            current_generation: fetch.2,
+            marker_val: marker_ref.0,
+            _marker: PhantomData,
+        }
+    }
+}
+
 pub struct Changed<T>(std::marker::PhantomData<T>);
 
 impl<T: 'static + Send + Sync> Filter for Changed<T> {
     fn matches(types: &HashSet<TypeId>) -> bool {
         types.contains(&TypeId::of::<T>()) && types.contains(&TypeId::of::<ChangedMarker<T>>())
     }
-
     fn collect_filter(withs: &mut Vec<TypeId>, _withouts: &mut Vec<TypeId>) {
         withs.push(TypeId::of::<ChangedMarker<T>>());
         register_tracked_component::<T>();
@@ -81,9 +142,8 @@ impl<T: 'static + Send + Sync> Filter for Changed<T> {
         let previous_generation = if current_generation == 1 { 2 } else { 1 };
 
         indices.retain(|&idx| {
-            detect_changed(
-                idx,
-                marker_ptr,
+            detect_changed::<T>(
+                unsafe { (*marker_ptr.add(idx)).0 },
                 current_generation,
                 system_last_generation,
                 previous_generation,
@@ -133,14 +193,11 @@ pub(crate) fn changed_marker_modify<T>(marker: *mut ChangedMarker<T>, generation
 }
 
 fn detect_changed<T>(
-    idx: usize,
-    marker_ptr: *const ChangedMarker<T>,
+    marker_val: u8,
     current_generation: u8,
     system_last_generation: u8,
     previous_generation: u8,
 ) -> bool {
-    let marker_val = unsafe { (*marker_ptr.add(idx)).0 };
-
     if marker_val == 0 {
         return false;
     }

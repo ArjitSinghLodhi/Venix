@@ -181,7 +181,7 @@ impl<'w, Q: WorldQuery + 'w, F: Filter> Query<Q, F> {
             let arch_id = arch.id();
             if Q::matches(&arch.types) && F::matches(&arch.types) {
                 matching_archetypes[arch_id as usize] = Some(arch as *const Archetype);
-                let fetch = unsafe { Q::init_fetch(arch) };
+                let fetch = unsafe { Q::init_fetch(arch, system_data) };
                 cached_fetches[arch_id as usize] = Some(fetch);
                 let mut indices = (0..arch.entities.len()).collect::<Vec<usize>>();
                 F::filter_indices(arch, &mut indices, system_data);

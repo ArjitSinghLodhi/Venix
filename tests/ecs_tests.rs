@@ -124,6 +124,18 @@ fn verify_change_tracking(query: Query<&Position, Changed<Position>>) {
     assert!(change_detected);
 }
 
+fn verify_change_tracking_data(query: Query<(&Position, ChangedTracker<Position>)>) {
+    let mut change_detected = false;
+    for chunk in query.iter() {
+        for (pos, mark) in chunk.iter() {
+            if pos.x == 50.0 && mark.is_changed() {
+                change_detected = true;
+            }
+        }
+    }
+    assert!(change_detected);
+}
+
 rusty_fork_test! {
     #[test]
     fn test_changed_generational_tracking() {
@@ -132,7 +144,7 @@ rusty_fork_test! {
             .add_systems(Startup::id(), spawn_tracking_entity)
             .add_systems(
                 Update::id(),
-                (modify_component_system, verify_change_tracking),
+                (modify_component_system, verify_change_tracking, verify_change_tracking_data),
             );
 
         app.set_runner(test_runner_once);

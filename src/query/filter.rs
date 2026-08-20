@@ -8,13 +8,16 @@ use crate::{
 
 pub trait StructuralFilter: Filter {}
 
-impl<T: Filter + 'static> StructuralFilter for With<T> {}
-impl<T: Filter + 'static> StructuralFilter for Without<T> {}
+impl<T: 'static> StructuralFilter for With<T> {}
+impl<T: 'static> StructuralFilter for Without<T> {}
 impl<A: Filter + StructuralFilter, B: Filter + StructuralFilter> StructuralFilter for Or<A, B> {}
 impl<T: Filter> StructuralFilter for AnyOf<T> where AnyOf<T>: Filter {}
 
 pub trait Filter {
     fn matches(types: &HashSet<TypeId>) -> bool;
+    fn matches_negated(types: &HashSet<TypeId>) -> bool {
+        !Self::matches(types)
+    }
     fn collect_filter(withs: &mut Vec<std::any::TypeId>, withouts: &mut Vec<std::any::TypeId>);
     fn filter_indices(
         _archetype: &Archetype,
@@ -58,6 +61,10 @@ macro_rules! impl_filter_tuple {
                 $($name::matches(types))&&*
             }
 
+            fn matches_negated(types: &HashSet<TypeId>) -> bool {
+                $($name::matches_negated(types))&&*
+            }
+
             #[inline]
             fn collect_filter(withs: &mut Vec<TypeId>, withouts: &mut Vec<TypeId>) {
                 $(
@@ -72,6 +79,7 @@ macro_rules! impl_filter_tuple {
                 )*
             }
         }
+        impl<$($name: Filter + StructuralFilter),*> StructuralFilter for ($($name,)*){}
     };
 }
 
@@ -83,3 +91,5 @@ impl_filter_tuple!(A, B, C, D, E);
 impl_filter_tuple!(A, B, C, D, E, F);
 impl_filter_tuple!(A, B, C, D, E, F, G);
 impl_filter_tuple!(A, B, C, D, E, F, G, H);
+impl_filter_tuple!(A, B, C, D, E, F, G, H, I);
+impl_filter_tuple!(A, B, C, D, E, F, G, H, I, J);

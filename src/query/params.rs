@@ -3,6 +3,7 @@ use std::{any::TypeId, collections::HashSet, sync::atomic::Ordering};
 use crate::{
     entity::Entity,
     query::changed::{ChangedMarker, Mut, changed_marker_modify, no_op_mut},
+    system::validation::FunctionData,
     world::{archetypes::Archetype, storage::CURRENT_FRAME_GENERATION},
 };
 
@@ -12,7 +13,7 @@ pub trait WorldQuery {
     type Fetch: Copy;
 
     fn matches(types: &HashSet<TypeId>) -> bool;
-    unsafe fn init_fetch(archetype: &Archetype) -> Self::Fetch;
+    unsafe fn init_fetch(archetype: &Archetype, systems_data: &mut FunctionData) -> Self::Fetch;
     fn collect_access(reads: &mut Vec<std::any::TypeId>, writes: &mut Vec<std::any::TypeId>);
     unsafe fn fetch_mut<'w>(fetch: Self::Fetch, index: usize) -> Self::Item<'w>;
     unsafe fn fetch_read_only<'w>(fetch: Self::Fetch, index: usize) -> Self::ReadOnlyItem<'w>;
@@ -29,7 +30,7 @@ impl<T: 'static> WorldQuery for &T {
     fn collect_access(reads: &mut Vec<std::any::TypeId>, _writes: &mut Vec<std::any::TypeId>) {
         reads.push(TypeId::of::<T>());
     }
-    unsafe fn init_fetch(archetype: &Archetype) -> Self::Fetch {
+    unsafe fn init_fetch(archetype: &Archetype, _: &mut FunctionData) -> Self::Fetch {
         unsafe { (*archetype.fetch_column_raw::<T>()).as_ptr() }
     }
     unsafe fn fetch_mut<'w>(fetch: Self::Fetch, index: usize) -> Self::Item<'w> {
@@ -53,7 +54,7 @@ impl<T: 'static + Send + Sync> WorldQuery for &mut T {
         types.contains(&TypeId::of::<T>())
     }
 
-    unsafe fn init_fetch(archetype: &Archetype) -> Self::Fetch {
+    unsafe fn init_fetch(archetype: &Archetype, _: &mut FunctionData) -> Self::Fetch {
         unsafe {
             let data_ptr = (*archetype.fetch_column_raw::<T>()).as_mut_ptr();
             let columns = &mut *archetype.columns.get();
@@ -116,7 +117,7 @@ impl WorldQuery for Entity {
         true
     }
     fn collect_access(_reads: &mut Vec<TypeId>, _writes: &mut Vec<TypeId>) {}
-    unsafe fn init_fetch(archetype: &Archetype) -> Self::Fetch {
+    unsafe fn init_fetch(archetype: &Archetype, _: &mut FunctionData) -> Self::Fetch {
         archetype.entities.as_ptr()
     }
     unsafe fn fetch_mut<'w>(fetch: Self::Fetch, index: usize) -> Self::Item<'w> {
@@ -140,7 +141,7 @@ impl<T: 'static> WorldQuery for Option<&T> {
         reads.push(TypeId::of::<T>());
     }
 
-    unsafe fn init_fetch(archetype: &Archetype) -> Self::Fetch {
+    unsafe fn init_fetch(archetype: &Archetype, _: &mut FunctionData) -> Self::Fetch {
         if archetype.types.contains(&TypeId::of::<T>()) {
             unsafe { Some((*archetype.fetch_column_raw::<T>()).as_mut_ptr()) }
         } else {
@@ -183,7 +184,7 @@ impl<T: 'static + Send + Sync> WorldQuery for Option<&mut T> {
         writes.push(TypeId::of::<ChangedMarker<T>>());
     }
 
-    unsafe fn init_fetch(archetype: &Archetype) -> Self::Fetch {
+    unsafe fn init_fetch(archetype: &Archetype, _: &mut FunctionData) -> Self::Fetch {
         unsafe {
             let columns = &mut *archetype.columns.get();
             let component_id = TypeId::of::<T>();
@@ -258,7 +259,7 @@ macro_rules! impl_world_query_tuple {
             type Fetch = ($($name::Fetch,)*);
 
             fn matches(types: &HashSet<TypeId>) -> bool { $($name::matches(types))&&* }
-            unsafe fn init_fetch(archetype: &Archetype) -> Self::Fetch { unsafe { ($($name::init_fetch(archetype),)*) } }
+            unsafe fn init_fetch(archetype: &Archetype, systems_data: &mut FunctionData) -> Self::Fetch { unsafe { ($($name::init_fetch(archetype, systems_data),)*) } }
             unsafe fn fetch_mut<'w>(fetch: Self::Fetch, index: usize) -> Self::Item<'w> {
                 unsafe {($($name::fetch_mut(fetch.$idx, index),)*)}
             }
