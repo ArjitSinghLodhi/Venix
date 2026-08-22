@@ -32,7 +32,7 @@ macro_rules! impl_system_for_functions {
                 )*
 
                 for param in &params_access {
-                    let has_intra_read_write_conflict = param.writes.iter().any(|w| param.reads.contains(w));
+                    let has_intra_read_write_conflict = param.writes.iter().any(|w| param.reads.vec.contains(w));
 
                     let mut unique_writes = std::collections::HashSet::new();
                     let has_duplicate_writes = param.writes.iter().any(|w| !unique_writes.insert(w));
@@ -50,12 +50,12 @@ macro_rules! impl_system_for_functions {
                         let param_a = &params_access[i];
                         let param_b = &params_access[j];
 
-                        let has_write_conflict = param_a.writes.iter().any(|w| param_b.writes.contains(w) || param_b.reads.contains(w))
-                            || param_b.writes.iter().any(|w| param_a.writes.contains(w) || param_a.reads.contains(w));
+                        let has_write_conflict = param_a.writes.iter().any(|w| param_b.writes.vec.contains(w) || param_b.reads.vec.contains(w))
+                            || param_b.writes.iter().any(|w| param_a.writes.vec.contains(w) || param_a.reads.vec.contains(w));
 
                         if has_write_conflict {
-                            let is_disjoint = param_a.with_filters.iter().any(|f| param_b.without_filters.contains(f))
-                                || param_b.with_filters.iter().any(|f| param_a.without_filters.contains(f));
+                            let is_disjoint = param_a.with_filters.iter().any(|f| param_b.without_filters.vec.contains(f))
+                                || param_b.with_filters.iter().any(|f| param_a.without_filters.vec.contains(f));
 
                             if !is_disjoint {
                                 panic!(
@@ -65,20 +65,12 @@ macro_rules! impl_system_for_functions {
                             }
                         }
 
-                        let has_resource_conflict = param_a.res_writes.iter().any(|rw| param_b.res_writes.contains(rw) || param_b.res_reads.contains(rw))
-                            || param_b.res_writes.iter().any(|rw| param_a.res_writes.contains(rw) || param_a.res_reads.contains(rw));
+                        let has_resource_conflict = param_a.res_writes.iter().any(|rw| param_b.res_writes.vec.contains(rw) || param_b.res_reads.vec.contains(rw))
+                            || param_b.res_writes.iter().any(|rw| param_a.res_writes.vec.contains(rw) || param_a.res_reads.vec.contains(rw));
 
                         if has_resource_conflict {
                             panic!(
                                 "❌ ECS RESOURCE BORROW CONFLICT: Function '{}' contains conflicting parameters (e.g. ResMut alongside Res, or duplicate ResMut) targeting the same global resource singleton!",
-                                std::any::type_name::<F>()
-                            );
-                        }
-                        let has_commands_conflict = param_a.commands_accessed.iter().any(|rw| param_b.commands_accessed.contains(rw))
-                            || param_b.commands_accessed.iter().any(|rw| param_a.commands_accessed.contains(rw));
-                        if has_commands_conflict {
-                            panic!(
-                                "❌ ECS Commands Argument CONFLICT: Function '{}' contains conflicting parameters (Duplicate Commands parameter) targeting the same Commands Buffer!",
                                 std::any::type_name::<F>()
                             );
                         }

@@ -98,13 +98,13 @@ impl World {
         let mut commands = std::mem::replace(&mut self.commands, CommandBuffer::new());
         let registry_ptr = std::ptr::addr_of_mut!(REGISTRY);
         let vec = &mut unsafe { &mut *registry_ptr }.0;
-        commands.queue.apply(self);
-        for target in commands.pending_despawns.iter() {
+        commands.data.queue.apply(self);
+        for target in commands.data.despawns.iter() {
             vec[target.entity.registry_index as usize]
                 .handle_count
                 .fetch_sub(1, Ordering::Relaxed);
         }
-        for despawn_target in commands.pending_despawns.drain() {
+        for despawn_target in commands.data.despawns.drain() {
             despawn_target.apply(self);
         }
         self.free_indices_list.sort_by(|a, b| b.cmp(a));

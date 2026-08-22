@@ -3,7 +3,7 @@ use std::{any::TypeId, collections::HashSet, sync::atomic::Ordering};
 use crate::{
     entity::Entity,
     query::changed::{ChangedMarker, Mut, changed_marker_modify, no_op_mut},
-    system::validation::FunctionData,
+    system::validation::{AccessVec, FunctionData},
     world::{archetypes::Archetype, storage::CURRENT_FRAME_GENERATION},
 };
 
@@ -14,7 +14,10 @@ pub trait WorldQuery {
 
     fn matches(types: &HashSet<TypeId>) -> bool;
     unsafe fn init_fetch(archetype: &Archetype, systems_data: &mut FunctionData) -> Self::Fetch;
-    fn collect_access(reads: &mut Vec<std::any::TypeId>, writes: &mut Vec<std::any::TypeId>);
+    fn collect_access(
+        reads: &mut AccessVec<std::any::TypeId>,
+        writes: &mut AccessVec<std::any::TypeId>,
+    );
     unsafe fn fetch_mut<'w>(fetch: Self::Fetch, index: usize) -> Self::Item<'w>;
     unsafe fn fetch_read_only<'w>(fetch: Self::Fetch, index: usize) -> Self::ReadOnlyItem<'w>;
 }
@@ -27,7 +30,10 @@ impl<T: 'static> WorldQuery for &T {
     fn matches(types: &HashSet<TypeId>) -> bool {
         types.contains(&TypeId::of::<T>())
     }
-    fn collect_access(reads: &mut Vec<std::any::TypeId>, _writes: &mut Vec<std::any::TypeId>) {
+    fn collect_access(
+        reads: &mut AccessVec<std::any::TypeId>,
+        _writes: &mut AccessVec<std::any::TypeId>,
+    ) {
         reads.push(TypeId::of::<T>());
     }
     unsafe fn init_fetch(archetype: &Archetype, _: &mut FunctionData) -> Self::Fetch {
@@ -102,7 +108,7 @@ impl<T: 'static + Send + Sync> WorldQuery for &mut T {
         unsafe { &*fetch.0.add(index) }
     }
 
-    fn collect_access(_reads: &mut Vec<TypeId>, writes: &mut Vec<TypeId>) {
+    fn collect_access(_reads: &mut AccessVec<TypeId>, writes: &mut AccessVec<TypeId>) {
         writes.push(TypeId::of::<T>());
         writes.push(TypeId::of::<ChangedMarker<T>>());
     }
@@ -116,7 +122,7 @@ impl WorldQuery for Entity {
     fn matches(_types: &HashSet<TypeId>) -> bool {
         true
     }
-    fn collect_access(_reads: &mut Vec<TypeId>, _writes: &mut Vec<TypeId>) {}
+    fn collect_access(_reads: &mut AccessVec<TypeId>, _writes: &mut AccessVec<TypeId>) {}
     unsafe fn init_fetch(archetype: &Archetype, _: &mut FunctionData) -> Self::Fetch {
         archetype.entities.as_ptr()
     }
@@ -137,7 +143,7 @@ impl<T: 'static> WorldQuery for Option<&T> {
         true
     }
 
-    fn collect_access(reads: &mut Vec<TypeId>, _writes: &mut Vec<TypeId>) {
+    fn collect_access(reads: &mut AccessVec<TypeId>, _writes: &mut AccessVec<TypeId>) {
         reads.push(TypeId::of::<T>());
     }
 
@@ -179,7 +185,7 @@ impl<T: 'static + Send + Sync> WorldQuery for Option<&mut T> {
         true
     }
 
-    fn collect_access(_reads: &mut Vec<TypeId>, writes: &mut Vec<TypeId>) {
+    fn collect_access(_reads: &mut AccessVec<TypeId>, writes: &mut AccessVec<TypeId>) {
         writes.push(TypeId::of::<T>());
         writes.push(TypeId::of::<ChangedMarker<T>>());
     }
@@ -268,7 +274,7 @@ macro_rules! impl_world_query_tuple {
                 unsafe { ($($name::fetch_read_only(fetch.$idx, index),)*) }
             }
 
-            fn collect_access(reads: &mut Vec<TypeId>, writes: &mut Vec<TypeId>) {
+            fn collect_access(reads: &mut AccessVec<TypeId>, writes: &mut AccessVec<TypeId>) {
                 $( $name::collect_access(reads, writes); )*
             }
         }

@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 
 use crate::query::filter::Filter;
 use crate::query::params::WorldQuery;
-use crate::system::validation::FunctionData;
+use crate::system::validation::{AccessHashSet, AccessVec, FunctionData};
 use crate::world::archetypes::{Archetype, ComponentColumn};
 use crate::world::storage::CURRENT_FRAME_GENERATION;
 use std::any::TypeId;
@@ -87,7 +87,10 @@ impl<T: 'static + Send + Sync> WorldQuery for ChangedTracker<T> {
         types.contains(&TypeId::of::<T>())
     }
 
-    fn collect_access(reads: &mut Vec<std::any::TypeId>, _writes: &mut Vec<std::any::TypeId>) {
+    fn collect_access(
+        reads: &mut AccessVec<std::any::TypeId>,
+        _writes: &mut AccessVec<std::any::TypeId>,
+    ) {
         reads.push(TypeId::of::<ChangedMarker<T>>());
         register_tracked_component::<T>();
     }
@@ -124,10 +127,10 @@ impl<T: 'static + Send + Sync> WorldQuery for ChangedTracker<T> {
 pub struct Changed<T>(std::marker::PhantomData<T>);
 
 impl<T: 'static + Send + Sync> Filter for Changed<T> {
-    fn matches(types: &HashSet<TypeId>) -> bool {
+    fn matches(types: &AccessHashSet<TypeId>) -> bool {
         types.contains(&TypeId::of::<T>())
     }
-    fn collect_filter(withs: &mut Vec<TypeId>, _withouts: &mut Vec<TypeId>) {
+    fn collect_filter(withs: &mut AccessVec<TypeId>, _withouts: &mut AccessVec<TypeId>) {
         withs.push(TypeId::of::<ChangedMarker<T>>());
         register_tracked_component::<T>();
     }

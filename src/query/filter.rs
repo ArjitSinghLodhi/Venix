@@ -1,8 +1,8 @@
-use std::{any::TypeId, collections::HashSet};
+use std::any::TypeId;
 
 use crate::{
     query::ergonomic_params::{AnyOf, Not, Or},
-    system::validation::FunctionData,
+    system::validation::{AccessHashSet, AccessVec, FunctionData},
     world::archetypes::Archetype,
 };
 
@@ -15,11 +15,14 @@ impl<T: Filter + StructuralFilter> StructuralFilter for Not<T> {}
 impl<T: Filter> StructuralFilter for AnyOf<T> where AnyOf<T>: Filter {}
 
 pub trait Filter {
-    fn matches(types: &HashSet<TypeId>) -> bool;
-    fn matches_negated(types: &HashSet<TypeId>) -> bool {
+    fn matches(types: &AccessHashSet<TypeId>) -> bool;
+    fn matches_negated(types: &AccessHashSet<TypeId>) -> bool {
         !Self::matches(types)
     }
-    fn collect_filter(withs: &mut Vec<std::any::TypeId>, withouts: &mut Vec<std::any::TypeId>);
+    fn collect_filter(
+        withs: &mut AccessVec<std::any::TypeId>,
+        withouts: &mut AccessVec<std::any::TypeId>,
+    );
     fn filter_indices(
         _archetype: &Archetype,
         _indices: &mut Vec<usize>,
@@ -30,44 +33,44 @@ pub trait Filter {
 
 pub struct With<T>(std::marker::PhantomData<T>);
 impl<T: 'static> Filter for With<T> {
-    fn matches(types: &HashSet<TypeId>) -> bool {
+    fn matches(types: &AccessHashSet<TypeId>) -> bool {
         types.contains(&TypeId::of::<T>())
     }
-    fn collect_filter(withs: &mut Vec<TypeId>, _withouts: &mut Vec<TypeId>) {
+    fn collect_filter(withs: &mut AccessVec<TypeId>, _withouts: &mut AccessVec<TypeId>) {
         withs.push(std::any::TypeId::of::<T>());
     }
 }
 pub struct Without<T>(std::marker::PhantomData<T>);
 impl<T: 'static> Filter for Without<T> {
-    fn matches(types: &HashSet<TypeId>) -> bool {
+    fn matches(types: &AccessHashSet<TypeId>) -> bool {
         !types.contains(&TypeId::of::<T>())
     }
-    fn collect_filter(_withs: &mut Vec<TypeId>, withouts: &mut Vec<TypeId>) {
+    fn collect_filter(_withs: &mut AccessVec<TypeId>, withouts: &mut AccessVec<TypeId>) {
         withouts.push(std::any::TypeId::of::<T>());
     }
 }
 pub struct EmptyFilter;
 impl Filter for EmptyFilter {
-    fn matches(_: &HashSet<TypeId>) -> bool {
+    fn matches(_: &AccessHashSet<TypeId>) -> bool {
         true
     }
-    fn collect_filter(_withs: &mut Vec<TypeId>, _withouts: &mut Vec<TypeId>) {}
+    fn collect_filter(_withs: &mut AccessVec<TypeId>, _withouts: &mut AccessVec<TypeId>) {}
 }
 
 macro_rules! impl_filter_tuple {
     ($($name:ident),*) => {
         impl<$($name: Filter),*> Filter for ($($name,)*) {
             #[inline]
-            fn matches(types: &HashSet<TypeId>) -> bool {
+            fn matches(types: &AccessHashSet<TypeId>) -> bool {
                 $($name::matches(types))&&*
             }
 
-            fn matches_negated(types: &HashSet<TypeId>) -> bool {
+            fn matches_negated(types: &AccessHashSet<TypeId>) -> bool {
                 $($name::matches_negated(types))&&*
             }
 
             #[inline]
-            fn collect_filter(withs: &mut Vec<TypeId>, withouts: &mut Vec<TypeId>) {
+            fn collect_filter(withs: &mut AccessVec<TypeId>, withouts: &mut AccessVec<TypeId>) {
                 $(
                     $name::collect_filter(withs, withouts);
                 )*

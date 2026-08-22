@@ -423,37 +423,44 @@ impl<T: ComponentTuple> WorldCommand for RemoveComponentsCommand<T> {
     }
 }
 
-pub(crate) struct CommandBuffer {
+pub(crate) struct CommandsBufferData {
     pub(crate) queue: CommandQueue,
-    pub(crate) pending_despawns: HashSet<DespawnCommand>,
-    pub(crate) local_channels: ThreadLocal<RefCell<CommandQueue>>,
-    pub(crate) local_despawns: ThreadLocal<RefCell<HashSet<DespawnCommand>>>,
+    pub(crate) despawns: HashSet<DespawnCommand>,
+}
+
+impl CommandsBufferData {
+    pub(crate) fn new() -> Self {
+        Self {
+            queue: CommandQueue::new(),
+            despawns: HashSet::new(),
+        }
+    }
+}
+
+pub(crate) struct CommandBuffer {
+    pub(crate) data: CommandsBufferData,
+    pub(crate) local_data: ThreadLocal<RefCell<CommandsBufferData>>,
     pub(crate) merge_lock: Mutex<()>,
 }
 
 impl CommandBuffer {
     pub fn new() -> Self {
         Self {
-            queue: CommandQueue::new(),
-            pending_despawns: HashSet::new(),
-            local_channels: ThreadLocal::new(),
-            local_despawns: ThreadLocal::new(),
+            data: CommandsBufferData::new(),
+            local_data: ThreadLocal::new(),
             merge_lock: Mutex::new(()),
         }
     }
 }
 
 pub struct Commands<'a> {
-    pub(crate) local_queue: RefMut<'a, CommandQueue>,
-    pub(crate) local_despawns: RefMut<'a, HashSet<DespawnCommand>>,
+    pub(crate) local_data: RefMut<'a, CommandsBufferData>,
     pub(crate) master_buffer_address: usize,
 }
 
 impl<'a> SystemParam for Commands<'a> {
     fn get_access() -> ParamAccess {
-        let mut access = ParamAccess::default();
-        access.commands_accessed.push(TypeId::of::<Commands>());
-        access
+        ParamAccess::default()
     }
 
     fn extract(world: &mut World, _data: &mut FunctionData) -> Self {
@@ -463,18 +470,26 @@ impl<'a> SystemParam for Commands<'a> {
 
             let master_ref = &mut *master_buffer_ptr;
 
-            let q_cell = master_ref
-                .local_channels
-                .get_or(|| RefCell::new(CommandQueue::new()));
+            let data_cell = master_ref
+                .local_data
+                .get_or(|| RefCell::new(CommandsBufferData::new()));
+            match data_cell.try_borrow_mut() {
+                Ok(data_borrow) => Self {
+                    local_data: data_borrow,
+                    master_buffer_address,
+                },
+                _ => {
+                    let fallback_data = CommandsBufferData::new();
+                    let fallback_data_cell = RefCell::new(fallback_data);
+                    let local_borrow = fallback_data_cell.borrow_mut();
+                    let static_borrow: RefMut<'a, CommandsBufferData> =
+                        std::mem::transmute(local_borrow);
 
-            let d_cell = master_ref
-                .local_despawns
-                .get_or(|| RefCell::new(HashSet::new()));
-
-            Self {
-                local_queue: q_cell.borrow_mut(),
-                local_despawns: d_cell.borrow_mut(),
-                master_buffer_address,
+                    Self {
+                        local_data: static_borrow,
+                        master_buffer_address,
+                    }
+                }
             }
         }
     }
@@ -482,7 +497,7 @@ impl<'a> SystemParam for Commands<'a> {
 
 impl Commands<'_> {
     fn push<C: WorldCommand + 'static>(&mut self, command: C) {
-        self.local_queue.push(command);
+        self.local_data.queue.push(command);
     }
 
     pub fn spawn<T: ComponentTuple>(&mut self, components: T) {
@@ -490,7 +505,7 @@ impl Commands<'_> {
     }
 
     pub fn despawn(&mut self, entity: Entity) {
-        self.local_despawns.insert(DespawnCommand { entity });
+        self.local_data.despawns.insert(DespawnCommand { entity });
     }
 
     pub fn add_components<C: ComponentTuple>(&mut self, entity: Entity, components: C) {
@@ -505,35 +520,34 @@ impl Commands<'_> {
     }
 
     pub fn despawn_iter(&self) -> std::collections::hash_set::Iter<'_, DespawnCommand> {
-        self.local_despawns.iter()
+        self.local_data.despawns.iter()
     }
 }
 
 impl<'a> Drop for Commands<'a> {
     fn drop(&mut self) {
-        if self.local_queue.is_empty() && self.local_despawns.is_empty() {
+        if self.local_data.queue.is_empty() && self.local_data.despawns.is_empty() {
             return;
         }
-
         unsafe {
             let master_buffer_ptr = self.master_buffer_address as *mut CommandBuffer;
             let _guard = (*master_buffer_ptr).merge_lock.lock().unwrap();
 
-            if !self.local_queue.is_empty() {
-                let queue_offset = std::mem::offset_of!(CommandBuffer, queue);
+            if !self.local_data.queue.is_empty() {
+                let queue_offset = std::mem::offset_of!(CommandBuffer, data.queue);
                 let queue_ptr =
                     (master_buffer_ptr as *mut u8).add(queue_offset) as *mut CommandQueue;
 
-                (*queue_ptr).merge(&mut self.local_queue);
-                self.local_queue.clear_bytes();
+                (*queue_ptr).merge(&mut self.local_data.queue);
+                self.local_data.queue.clear_bytes();
             }
 
-            if !self.local_despawns.is_empty() {
-                let despawns_offset = std::mem::offset_of!(CommandBuffer, pending_despawns);
+            if !self.local_data.despawns.is_empty() {
+                let despawns_offset = std::mem::offset_of!(CommandBuffer, data.despawns);
                 let despawns_ptr = (master_buffer_ptr as *mut u8).add(despawns_offset)
                     as *mut HashSet<DespawnCommand>;
 
-                (*despawns_ptr).extend(self.local_despawns.drain());
+                (*despawns_ptr).extend(self.local_data.despawns.drain());
             }
         }
     }

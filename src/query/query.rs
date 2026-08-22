@@ -7,7 +7,7 @@ use crate::{
         params::WorldQuery,
     },
     registry::REGISTRY,
-    system::validation::FunctionData,
+    system::validation::{AccessHashSet, FunctionData},
     world::{archetypes::Archetype, storage::World},
 };
 
@@ -179,7 +179,11 @@ impl<'w, Q: WorldQuery + 'w, F: Filter> Query<Q, F> {
 
         for arch in world.archetypes_manager.archetypes.values() {
             let arch_id = arch.id();
-            if Q::matches(&arch.types) && F::matches(&arch.types) {
+            if Q::matches(&arch.types)
+                && F::matches(&AccessHashSet {
+                    set: arch.types.clone(),
+                })
+            {
                 matching_archetypes[arch_id as usize] = Some(arch as *const Archetype);
                 let fetch = unsafe { Q::init_fetch(arch, system_data) };
                 cached_fetches[arch_id as usize] = Some(fetch);

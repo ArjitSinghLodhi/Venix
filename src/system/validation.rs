@@ -1,4 +1,4 @@
-use std::sync::atomic::Ordering;
+use std::{any::TypeId, collections::HashSet, hash::Hash, sync::atomic::Ordering};
 
 use crate::{
     query::{filter::Filter, params::WorldQuery, query::Query},
@@ -6,16 +6,59 @@ use crate::{
     world::storage::{CURRENT_FRAME_GENERATION, World},
 };
 
+pub struct AccessHashSet<T: Eq + Hash> {
+    pub(crate) set: HashSet<T>,
+}
+
+impl<T: Eq + Hash> AccessHashSet<T> {
+    pub(crate) fn new() -> Self {
+        Self {
+            set: HashSet::new(),
+        }
+    }
+
+    pub fn insert(&mut self, val: T) -> bool {
+        self.set.insert(val)
+    }
+
+    pub fn contains(&self, val: &T) -> bool {
+        self.set.contains(val)
+    }
+}
+
+impl<T: Eq + Hash> Default for AccessHashSet<T> {
+    fn default() -> Self {
+        AccessHashSet::new()
+    }
+}
+
+pub struct AccessVec<T> {
+    pub(crate) vec: Vec<T>,
+}
+
+impl<T> Default for AccessVec<T> {
+    fn default() -> Self {
+        Self { vec: Vec::new() }
+    }
+}
+
+impl<T> AccessVec<T> {
+    pub fn push(&mut self, val: T) {
+        self.vec.push(val);
+    }
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &T> {
+        self.vec.iter()
+    }
+}
+
 #[derive(Default)]
 pub struct ParamAccess {
-    pub reads: Vec<std::any::TypeId>,
-    pub writes: Vec<std::any::TypeId>,
-    pub with_filters: Vec<std::any::TypeId>,
-    pub without_filters: Vec<std::any::TypeId>,
-    pub res_reads: Vec<std::any::TypeId>,
-    pub res_writes: Vec<std::any::TypeId>,
-    pub commands_accessed: Vec<std::any::TypeId>,
-    pub tracked_components: Vec<std::any::TypeId>,
+    pub reads: AccessVec<TypeId>,
+    pub writes: AccessVec<std::any::TypeId>,
+    pub with_filters: AccessVec<std::any::TypeId>,
+    pub without_filters: AccessVec<std::any::TypeId>,
+    pub res_reads: AccessVec<std::any::TypeId>,
+    pub res_writes: AccessVec<std::any::TypeId>,
 }
 
 pub trait SystemParam {
@@ -25,9 +68,7 @@ pub trait SystemParam {
 
 impl<Q: WorldQuery + 'static, F: Filter + 'static> SystemParam for Query<Q, F> {
     fn get_access() -> ParamAccess {
-        let mut access = ParamAccess {
-            ..Default::default()
-        };
+        let mut access = ParamAccess::default();
         Q::collect_access(&mut access.reads, &mut access.writes);
         F::collect_filter(&mut access.with_filters, &mut access.without_filters);
         access
