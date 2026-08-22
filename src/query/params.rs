@@ -2,7 +2,7 @@ use std::{any::TypeId, collections::HashSet, sync::atomic::Ordering};
 
 use crate::{
     entity::Entity,
-    query::changed::{ChangedMarker, Mut, changed_marker_modify, no_op_mut},
+    query::changed::{ChangedMarker, Mut},
     system::validation::{AccessVec, FunctionData},
     world::{archetypes::Archetype, storage::CURRENT_FRAME_GENERATION},
 };
@@ -46,15 +46,11 @@ impl<T: 'static> WorldQuery for &T {
         unsafe { &*fetch.add(index) }
     }
 }
-impl<T: 'static + Send + Sync> WorldQuery for &mut T {
+
+impl<T: 'static> WorldQuery for &mut T {
     type Item<'w> = Mut<'w, T>;
     type ReadOnlyItem<'w> = &'w T;
-    type Fetch = (
-        *mut T,
-        *mut ChangedMarker<T>,
-        u8,
-        fn(*mut ChangedMarker<T>, generation: u8),
-    );
+    type Fetch = (*mut T, *mut ChangedMarker<T>, u8, bool);
 
     fn matches(types: &HashSet<TypeId>) -> bool {
         types.contains(&TypeId::of::<T>())
@@ -74,19 +70,9 @@ impl<T: 'static + Send + Sync> WorldQuery for &mut T {
                     .downcast_mut::<Vec<ChangedMarker<T>>>()
                     .unwrap();
 
-                (
-                    data_ptr,
-                    vec_ptr.as_mut_ptr(),
-                    current_generation,
-                    changed_marker_modify,
-                )
+                (data_ptr, vec_ptr.as_mut_ptr(), current_generation, true)
             } else {
-                (
-                    data_ptr,
-                    std::ptr::null_mut(),
-                    current_generation,
-                    no_op_mut,
-                )
+                (data_ptr, std::ptr::null_mut(), current_generation, false)
             }
         }
     }
@@ -96,9 +82,9 @@ impl<T: 'static + Send + Sync> WorldQuery for &mut T {
         unsafe {
             Mut {
                 value: fetch.0.add(index),
-                marker: fetch.1.add(index),
-                deref_mut_function: fetch.3,
+                marker: fetch.1.wrapping_add(index),
                 generation: fetch.2,
+                should_modify: fetch.3,
                 _marker: std::marker::PhantomData,
             }
         }
@@ -171,15 +157,10 @@ impl<T: 'static> WorldQuery for Option<&T> {
     }
 }
 
-impl<T: 'static + Send + Sync> WorldQuery for Option<&mut T> {
+impl<T: 'static> WorldQuery for Option<&mut T> {
     type Item<'w> = Option<Mut<'w, T>>;
     type ReadOnlyItem<'w> = Option<&'w T>;
-    type Fetch = (
-        Option<*mut T>,
-        *mut ChangedMarker<T>,
-        u8,
-        fn(*mut ChangedMarker<T>, u8),
-    );
+    type Fetch = (Option<*mut T>, *mut ChangedMarker<T>, u8, bool);
 
     fn matches(_types: &HashSet<TypeId>) -> bool {
         true
@@ -212,18 +193,18 @@ impl<T: 'static + Send + Sync> WorldQuery for Option<&mut T> {
                         Some(data_ptr),
                         vec_ptr.as_mut_ptr(),
                         current_generation,
-                        changed_marker_modify,
+                        true,
                     )
                 } else {
                     (
                         Some(data_ptr),
                         std::ptr::null_mut(),
                         current_generation,
-                        no_op_mut,
+                        false,
                     )
                 }
             } else {
-                (None, std::ptr::null_mut(), current_generation, no_op_mut)
+                (None, std::ptr::null_mut(), current_generation, false)
             }
         }
     }
@@ -235,8 +216,8 @@ impl<T: 'static + Send + Sync> WorldQuery for Option<&mut T> {
                 Some(Mut {
                     value: data_head.add(index),
                     marker: fetch.1.add(index),
-                    deref_mut_function: fetch.3,
                     generation: fetch.2,
+                    should_modify: fetch.3,
                     _marker: std::marker::PhantomData,
                 })
             } else {

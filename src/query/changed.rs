@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fmt::Display;
 use std::marker::PhantomData;
 
 use crate::query::filter::Filter;
@@ -67,7 +68,7 @@ pub struct ChangedTracker<T> {
 
 impl<T> ChangedTracker<T> {
     pub fn is_changed(&self) -> bool {
-        detect_changed::<T>(
+        detect_changed(
             self.marker_val,
             self.current_generation,
             self.system_last_generation,
@@ -144,7 +145,7 @@ impl<T: 'static + Send + Sync> Filter for Changed<T> {
         let previous_generation = if current_generation == 1 { 2 } else { 1 };
 
         indices.retain(|&idx| {
-            detect_changed::<T>(
+            detect_changed(
                 unsafe { (*marker_ptr.add(idx)).0 },
                 current_generation,
                 system_last_generation,
@@ -157,8 +158,8 @@ impl<T: 'static + Send + Sync> Filter for Changed<T> {
 pub struct Mut<'w, T> {
     pub(crate) value: *mut T,
     pub(crate) marker: *mut ChangedMarker<T>,
-    pub(crate) deref_mut_function: fn(*mut ChangedMarker<T>, u8),
     pub(crate) generation: u8,
+    pub(crate) should_modify: bool,
     pub(crate) _marker: std::marker::PhantomData<&'w mut T>,
 }
 
@@ -177,7 +178,9 @@ impl<'w, T> std::ops::DerefMut for Mut<'w, T> {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe {
-            (self.deref_mut_function)(self.marker, self.generation);
+            if self.should_modify {
+                (*self.marker).0 = self.generation;
+            }
             &mut *self.value
         }
     }
@@ -189,28 +192,25 @@ impl<'w, T: std::fmt::Debug> std::fmt::Debug for Mut<'w, T> {
     }
 }
 
-pub(crate) fn no_op_mut<T>(_marker: *mut ChangedMarker<T>, _generation: u8) {}
-pub(crate) fn changed_marker_modify<T>(marker: *mut ChangedMarker<T>, generation: u8) {
-    (unsafe { &mut *marker }).0 = generation;
+impl<'w, T: Display> std::fmt::Display for Mut<'w, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        unsafe { std::fmt::Display::fmt(&*self.value, f) }
+    }
 }
 
-fn detect_changed<T>(
+fn detect_changed(
     marker_val: u8,
     current_generation: u8,
     system_last_generation: u8,
     previous_generation: u8,
 ) -> bool {
-    if marker_val == 0 {
-        return false;
-    }
+    let is_not_zero = marker_val != 0;
+    let is_current = marker_val == current_generation;
+    let is_previous = marker_val == previous_generation;
 
-    if marker_val == current_generation {
-        return system_last_generation != current_generation;
-    }
-    if marker_val == previous_generation {
-        return system_last_generation != previous_generation
-            && system_last_generation != current_generation;
-    }
+    let check_current = is_current && (system_last_generation != current_generation);
+    let check_previous =
+        !is_current && is_previous && (system_last_generation == previous_generation);
 
-    false
+    is_not_zero && (check_current || check_previous)
 }

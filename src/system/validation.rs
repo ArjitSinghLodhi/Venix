@@ -1,9 +1,9 @@
-use std::{any::TypeId, collections::HashSet, hash::Hash, sync::atomic::Ordering};
+use std::{any::TypeId, collections::HashSet, hash::Hash};
 
 use crate::{
     query::{filter::Filter, params::WorldQuery, query::Query},
     resources::{Res, ResMut},
-    world::storage::{CURRENT_FRAME_GENERATION, World},
+    world::storage::World,
 };
 
 pub struct AccessHashSet<T: Eq + Hash> {
@@ -75,11 +75,6 @@ impl<Q: WorldQuery + 'static, F: Filter + 'static> SystemParam for Query<Q, F> {
     }
 
     fn extract(world: &mut World, system_data: &mut FunctionData) -> Self {
-        let world_gen = CURRENT_FRAME_GENERATION.load(Ordering::Relaxed);
-        if system_data.current_run_generation != world_gen {
-            system_data.last_run_generation = system_data.current_run_generation;
-            system_data.current_run_generation = world_gen;
-        }
         Query::<Q, F>::new(world, system_data)
     }
 }

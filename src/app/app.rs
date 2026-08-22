@@ -186,8 +186,9 @@ impl App {
         function(self);
     }
 
-    pub fn set_runner(&mut self, function: fn(&mut App)) {
+    pub fn set_runner(&mut self, function: fn(&mut App)) -> &mut Self {
         self.runner_fn = function;
+        self
     }
 
     pub fn insert_resource<T: 'static>(&mut self, resource: T) -> &mut Self {
@@ -310,6 +311,9 @@ impl App {
         }
 
         for (id, schedule) in &schedule_map {
+            if schedule.schedule.id_from_self() == Startup::id() {
+                continue;
+            }
             let place = schedule.schedule.get_place();
             let current_schedule_name = schedule.schedule.name();
 

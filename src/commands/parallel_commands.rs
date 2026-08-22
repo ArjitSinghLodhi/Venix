@@ -38,7 +38,7 @@ impl ParallelCommands {
                 Ok(data_borrow) => {
                     let commands = Commands {
                         local_data: data_borrow,
-                        master_buffer_address: self.master_buffer_ptr as usize,
+                        master_buffer_ptr: self.master_buffer_ptr,
                     };
                     f(commands);
                 }
@@ -48,7 +48,7 @@ impl ParallelCommands {
 
                     let commands = Commands {
                         local_data: fallback_data_cell.borrow_mut(),
-                        master_buffer_address: self.master_buffer_ptr as usize,
+                        master_buffer_ptr: self.master_buffer_ptr,
                     };
 
                     f(commands);

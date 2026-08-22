@@ -455,7 +455,7 @@ impl CommandBuffer {
 
 pub struct Commands<'a> {
     pub(crate) local_data: RefMut<'a, CommandsBufferData>,
-    pub(crate) master_buffer_address: usize,
+    pub(crate) master_buffer_ptr: *mut CommandBuffer,
 }
 
 impl<'a> SystemParam for Commands<'a> {
@@ -466,7 +466,6 @@ impl<'a> SystemParam for Commands<'a> {
     fn extract(world: &mut World, _data: &mut FunctionData) -> Self {
         unsafe {
             let master_buffer_ptr = std::ptr::addr_of_mut!(world.commands);
-            let master_buffer_address = master_buffer_ptr as usize;
 
             let master_ref = &mut *master_buffer_ptr;
 
@@ -476,7 +475,7 @@ impl<'a> SystemParam for Commands<'a> {
             match data_cell.try_borrow_mut() {
                 Ok(data_borrow) => Self {
                     local_data: data_borrow,
-                    master_buffer_address,
+                    master_buffer_ptr: master_buffer_ptr,
                 },
                 _ => {
                     let fallback_data = CommandsBufferData::new();
@@ -487,7 +486,7 @@ impl<'a> SystemParam for Commands<'a> {
 
                     Self {
                         local_data: static_borrow,
-                        master_buffer_address,
+                        master_buffer_ptr: master_buffer_ptr,
                     }
                 }
             }
@@ -530,7 +529,7 @@ impl<'a> Drop for Commands<'a> {
             return;
         }
         unsafe {
-            let master_buffer_ptr = self.master_buffer_address as *mut CommandBuffer;
+            let master_buffer_ptr = self.master_buffer_ptr;
             let _guard = (*master_buffer_ptr).merge_lock.lock().unwrap();
 
             if !self.local_data.queue.is_empty() {

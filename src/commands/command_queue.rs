@@ -46,25 +46,23 @@ impl CommandQueue {
         let total_new_bytes = aligned_old_bytes + block_size;
         let target_u64_count =
             (total_new_bytes + mem::size_of::<u64>() - 1) / mem::size_of::<u64>();
-        let old_u64_count = self.u64_chunks.len();
 
+        let old_u64_count = self.u64_chunks.len();
         self.u64_chunks.reserve(target_u64_count - old_u64_count);
 
         unsafe {
             let base_alloc_ptr = self.u64_chunks.as_mut_ptr().cast::<u8>().add(old_byte_len);
             ptr::write_bytes(base_alloc_ptr, 0, padding_gap);
-
             let base_ptr = self
                 .u64_chunks
                 .as_mut_ptr()
                 .cast::<u8>()
                 .add(aligned_old_bytes);
-
             let meta = CommandMeta {
                 payload_offset,
                 block_size,
                 consume_and_advance: |payload_ptr, world| {
-                    let command: C = ptr::read(payload_ptr.cast());
+                    let command: C = ptr::read_unaligned(payload_ptr.cast());
 
                     match world {
                         Some(w) => command.apply(w),
@@ -72,11 +70,9 @@ impl CommandQueue {
                     }
                 },
             };
-
             ptr::write(base_ptr.cast::<CommandMeta>(), meta);
             let payload_target = base_ptr.add(payload_offset).cast::<C>();
-            ptr::write(payload_target, command);
-
+            ptr::write_unaligned(payload_target, command);
             self.u64_chunks.set_len(target_u64_count);
         }
     }

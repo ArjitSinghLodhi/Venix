@@ -2,7 +2,9 @@ use crate::system::validation::FunctionSystem;
 use crate::system::validation::IntoSystem;
 use crate::system::validation::System;
 use crate::system::validation::SystemParam;
+use crate::world::storage::CURRENT_FRAME_GENERATION;
 use crate::world::storage::World;
+use std::sync::atomic::Ordering;
 macro_rules! impl_system_for_functions {
     ($($var:ident : $param:ident),*) => {
         impl<$($param,)* F> System for FunctionSystem<($($param,)*), F>
@@ -16,6 +18,12 @@ macro_rules! impl_system_for_functions {
                     let $var = <$param>::extract(world, data);
                 )*
                 (self.func)($($var),*);
+                let system_data = &mut self.data;
+                let world_gen = CURRENT_FRAME_GENERATION.load(Ordering::Relaxed);
+                if system_data.current_run_generation != world_gen {
+                    system_data.last_run_generation = system_data.current_run_generation;
+                    system_data.current_run_generation = world_gen;
+                }
             }
         }
 
