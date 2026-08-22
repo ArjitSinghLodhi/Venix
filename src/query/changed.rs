@@ -7,7 +7,7 @@ use crate::query::params::WorldQuery;
 use crate::system::validation::{AccessHashSet, AccessVec, FunctionData};
 use crate::world::archetypes::{Archetype, ComponentColumn};
 use crate::world::storage::CURRENT_FRAME_GENERATION;
-use std::any::TypeId;
+use std::any::{Any, TypeId};
 use std::sync::RwLock;
 
 #[derive(Debug)]
@@ -16,7 +16,7 @@ pub(crate) struct TrackedComponentMeta {
     pub(crate) marker_id: TypeId,
     pub(crate) create_marker_column: fn() -> ComponentColumn,
     pub(crate) push_default_marker: unsafe fn(&mut ComponentColumn),
-    pub(crate) clear_column_markers: unsafe fn(&mut dyn std::any::Any),
+    pub(crate) clear_column_markers: unsafe fn(&mut dyn Any),
 }
 
 pub(crate) static TRACKED_COMPONENTS: RwLock<Vec<TrackedComponentMeta>> = RwLock::new(Vec::new());
@@ -204,13 +204,14 @@ fn detect_changed(
     system_last_generation: u8,
     previous_generation: u8,
 ) -> bool {
-    let is_not_zero = marker_val != 0;
-    let is_current = marker_val == current_generation;
-    let is_previous = marker_val == previous_generation;
+    if marker_val == 0 {
+        return false;
+    }
 
-    let check_current = is_current && (system_last_generation != current_generation);
-    let check_previous =
-        !is_current && is_previous && (system_last_generation == previous_generation);
+    let is_current =
+        (marker_val == current_generation) && (system_last_generation != current_generation);
+    let is_previous =
+        (marker_val == previous_generation) && (system_last_generation != previous_generation);
 
-    is_not_zero && (check_current || check_previous)
+    is_current || is_previous
 }

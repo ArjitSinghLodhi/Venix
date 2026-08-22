@@ -240,10 +240,11 @@ fn verify_multi_frame_tracking(
     changed_query: Query<&Position, Changed<Position>>,
 ) {
     if counter.current_frame == 1 {
-        let mut _changes = 0;
+        let mut changes = 0;
         for chunk in changed_query.iter() {
-            _changes += chunk.len();
+            changes += chunk.len();
         }
+        assert_eq!(changes, 0);
     }
 
     if counter.current_frame == 2 {

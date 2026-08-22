@@ -13,17 +13,16 @@ macro_rules! impl_system_for_functions {
             F: Fn($($param),*) + 'static,
         {
             fn run(&mut self, world: &mut World) {
-                let data = &mut self.data;
-                $(
-                    let $var = <$param>::extract(world, data);
-                )*
-                (self.func)($($var),*);
                 let system_data = &mut self.data;
                 let world_gen = CURRENT_FRAME_GENERATION.load(Ordering::Relaxed);
                 if system_data.current_run_generation != world_gen {
                     system_data.last_run_generation = system_data.current_run_generation;
                     system_data.current_run_generation = world_gen;
                 }
+                $(
+                    let $var = <$param>::extract(world, system_data);
+                )*
+                (self.func)($($var),*);
             }
         }
 
