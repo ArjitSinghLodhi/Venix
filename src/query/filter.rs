@@ -1,7 +1,7 @@
 use std::{any::TypeId, collections::HashSet};
 
 use crate::{
-    query::ergonomic_params::{AnyOf, Or},
+    query::ergonomic_params::{AnyOf, Not, Or},
     system::validation::FunctionData,
     world::archetypes::Archetype,
 };
@@ -11,6 +11,7 @@ pub trait StructuralFilter: Filter {}
 impl<T: 'static> StructuralFilter for With<T> {}
 impl<T: 'static> StructuralFilter for Without<T> {}
 impl<A: Filter + StructuralFilter, B: Filter + StructuralFilter> StructuralFilter for Or<A, B> {}
+impl<T: Filter + StructuralFilter> StructuralFilter for Not<T> {}
 impl<T: Filter> StructuralFilter for AnyOf<T> where AnyOf<T>: Filter {}
 
 pub trait Filter {
@@ -93,3 +94,6 @@ impl_filter_tuple!(A, B, C, D, E, F, G);
 impl_filter_tuple!(A, B, C, D, E, F, G, H);
 impl_filter_tuple!(A, B, C, D, E, F, G, H, I);
 impl_filter_tuple!(A, B, C, D, E, F, G, H, I, J);
+impl_filter_tuple!(A, B, C, D, E, F, G, H, I, J, K);
+impl_filter_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
+impl_filter_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M);

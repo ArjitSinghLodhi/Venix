@@ -13,7 +13,7 @@ use crate::{
 
 pub(crate) static CURRENT_FRAME_GENERATION: AtomicU8 = AtomicU8::new(1);
 pub struct World {
-    pub(crate) archetypes: ArchetypeManager,
+    pub(crate) archetypes_manager: ArchetypeManager,
     pub(crate) resources: HashMap<std::any::TypeId, std::cell::UnsafeCell<Box<dyn std::any::Any>>>,
     pub(crate) commands: CommandBuffer,
     pub(crate) free_indices_list: Vec<u32>,
@@ -21,10 +21,10 @@ pub struct World {
 
 impl World {
     pub fn new() -> Self {
-        let archetypes = ArchetypeManager::new();
+        let archetypes_manager = ArchetypeManager::new();
         let resources = HashMap::new();
         let world = Self {
-            archetypes,
+            archetypes_manager,
             resources,
             commands: CommandBuffer::new(),
             free_indices_list: Vec::new(),
@@ -38,7 +38,7 @@ impl World {
     pub(crate) fn get_or_create_archetype_from_generic<T: ComponentTuple>(
         &mut self,
     ) -> ArchetypeId {
-        self.archetypes.get_or_create_from_generic::<T>()
+        self.archetypes_manager.get_or_create_from_generic::<T>()
     }
 
     pub(crate) fn get_or_create_archetype_from_set(
@@ -46,7 +46,7 @@ impl World {
         types_set: std::collections::HashSet<std::any::TypeId>,
         types_names_set: HashSet<&'static str>,
     ) -> ArchetypeId {
-        self.archetypes
+        self.archetypes_manager
             .get_or_create_from_set(types_set, types_names_set)
     }
 
@@ -95,30 +95,29 @@ impl World {
     }
 
     pub fn apply_commands(&mut self) {
-        let commands_ptr = &mut self.commands as *mut CommandBuffer;
-        let commands = unsafe { commands_ptr.as_mut().unwrap() };
+        let mut commands = std::mem::replace(&mut self.commands, CommandBuffer::new());
         let registry_ptr = std::ptr::addr_of_mut!(REGISTRY);
         let vec = &mut unsafe { &mut *registry_ptr }.0;
         commands.queue.apply(self);
-        self.free_indices_list.sort_by(|a, b| b.cmp(a));
-        let mut despawn_targets_queue = std::mem::take(&mut commands.pending_despawns);
-        for target in despawn_targets_queue.iter() {
+        for target in commands.pending_despawns.iter() {
             vec[target.entity.registry_index as usize]
                 .handle_count
                 .fetch_sub(1, Ordering::Relaxed);
         }
-        for despawn_target in despawn_targets_queue.drain() {
+        for despawn_target in commands.pending_despawns.drain() {
             despawn_target.apply(self);
         }
-        commands.pending_despawns = despawn_targets_queue;
+        self.free_indices_list.sort_by(|a, b| b.cmp(a));
+        self.commands = commands;
     }
+
     pub fn clear_changed_tracker(&mut self) {
         let current = CURRENT_FRAME_GENERATION.load(Ordering::Relaxed);
         let next = if current == 1 { 2 } else { 1 };
         CURRENT_FRAME_GENERATION.store(next, Ordering::Relaxed);
         let tracked = TRACKED_COMPONENTS.get().unwrap();
 
-        for archetype in self.archetypes.archetypes.values_mut() {
+        for archetype in self.archetypes_manager.archetypes.values_mut() {
             unsafe {
                 let columns = &mut *archetype.columns.get();
 

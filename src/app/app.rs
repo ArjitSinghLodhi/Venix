@@ -1,6 +1,7 @@
 use std::{
     any::TypeId,
     collections::{HashMap, HashSet, VecDeque},
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 use crate::{
@@ -13,6 +14,8 @@ use crate::{
     system::validation::{IntoSystemConfigs, System},
     world::storage::World,
 };
+
+static APP_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 struct ConfigurationContext {
     plugins_processed: bool,
@@ -64,6 +67,12 @@ impl ConfigurationContext {
             panic!("Startup not processed already when expected");
         }
     }
+
+    fn not_ready(&self) {
+        if self.built || self.ran_startup {
+            panic!("App already built when expected not");
+        }
+    }
 }
 
 struct SystemsBlock {
@@ -82,6 +91,11 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
+        if APP_INITIALIZED.swap(true, Ordering::Relaxed) {
+            panic!(
+                "❌ VENIX ARCHITECTURE VIOLATION: Multiple App instances detected!\nEnsure you only instantiate exactly one App::new() across your entire binary runtime."
+            );
+        }
         crate::query::changed::TRACKED_COMPONENTS.get_or_init(Vec::new);
         let mut schedules = Vec::new();
         schedules.push(Schedule::new(Startup));
@@ -103,6 +117,7 @@ impl App {
     }
 
     pub fn add_schedule<T: ScheduleLabel + 'static>(&mut self, schedule: T) -> &mut Self {
+        self.configuration.not_ready();
         self.schedules.push(Schedule::new(schedule));
         self
     }
@@ -112,6 +127,7 @@ impl App {
         schedule: ScheduleId,
         systems: impl IntoSystemConfigs<M>,
     ) -> &mut Self {
+        self.configuration.not_ready();
         let mut block = SystemsBlock {
             schedule_id: schedule,
             systems: Vec::new(),
@@ -121,12 +137,8 @@ impl App {
         self
     }
 
-    pub fn insert_resource<T: 'static>(&mut self, resource: T) -> &mut Self {
-        self.world.insert_resource(resource);
-        self
-    }
-
     pub fn add_plugins<T: PluginsBuildAll + 'static>(&mut self, plugins: T) -> &mut Self {
+        self.configuration.not_ready();
         self.plugins.push(Box::new(plugins));
         self
     }
@@ -146,9 +158,7 @@ impl App {
     }
 
     pub fn build(&mut self) {
-        if self.configuration.built {
-            panic!("App Already Built");
-        }
+        self.configuration.not_ready();
         self.build_everything();
         self.configuration.built = true;
     }
@@ -179,6 +189,16 @@ impl App {
 
     pub fn set_runner(&mut self, function: fn(&mut App)) {
         self.runner_fn = function;
+    }
+
+    pub fn insert_resource<T: 'static>(&mut self, resource: T) -> &mut Self {
+        self.world.insert_resource(resource);
+        self
+    }
+
+    pub fn remove_resource<T: 'static>(&mut self) -> &mut Self {
+        self.world.remove_resource::<T>();
+        self
     }
 }
 

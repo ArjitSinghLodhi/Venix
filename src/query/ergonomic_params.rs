@@ -59,3 +59,5 @@ impl_any_of_tuple!(A, B, C, D, E, F, G);
 impl_any_of_tuple!(A, B, C, D, E, F, G, H);
 impl_any_of_tuple!(A, B, C, D, E, F, G, H, I);
 impl_any_of_tuple!(A, B, C, D, E, F, G, H, I, J);
+impl_any_of_tuple!(A, B, C, D, E, F, G, H, I, J, K);
+impl_any_of_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);

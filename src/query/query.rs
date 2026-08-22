@@ -173,11 +173,11 @@ unsafe impl<Q: WorldQuery, F: Filter> Sync for Query<Q, F> {}
 
 impl<'w, Q: WorldQuery + 'w, F: Filter> Query<Q, F> {
     pub(crate) fn new(world: &mut World, system_data: &mut FunctionData) -> Self {
-        let mut matching_archetypes = vec![None; world.archetypes.archetypes.len()];
-        let mut cached_fetches = vec![None; world.archetypes.archetypes.len()];
-        let mut cached_indices = vec![Vec::new(); world.archetypes.archetypes.len()];
+        let mut matching_archetypes = vec![None; world.archetypes_manager.archetypes.len()];
+        let mut cached_fetches = vec![None; world.archetypes_manager.archetypes.len()];
+        let mut cached_indices = vec![Vec::new(); world.archetypes_manager.archetypes.len()];
 
-        for arch in world.archetypes.archetypes.values() {
+        for arch in world.archetypes_manager.archetypes.values() {
             let arch_id = arch.id();
             if Q::matches(&arch.types) && F::matches(&arch.types) {
                 matching_archetypes[arch_id as usize] = Some(arch as *const Archetype);

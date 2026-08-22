@@ -30,25 +30,25 @@ pub enum SchedulePlace {
     After(ScheduleId),
 }
 
-pub trait ScheduleLabel
+pub trait ScheduleLabelAny: Any {
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+}
+
+impl<T: Any + ScheduleLabel> ScheduleLabelAny for T {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+pub trait ScheduleLabel: ScheduleLabelAny
 where
     Self: 'static,
 {
     fn get_place(&self) -> SchedulePlace;
-
-    fn as_any(&self) -> &dyn Any {
-        unsafe {
-            let thin_ptr = self as *const Self as *const ();
-            &*(thin_ptr as *const (dyn Any + 'static))
-        }
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        unsafe {
-            let thin_ptr = self as *mut Self as *mut ();
-            &mut *(thin_ptr as *mut (dyn Any + 'static))
-        }
-    }
 
     fn runner_fn() -> fn(&mut dyn ScheduleLabel, &mut World, &mut [Box<dyn System>])
     where

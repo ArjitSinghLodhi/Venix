@@ -1,7 +1,11 @@
 use std::{
     any::TypeId,
+    cell::{RefCell, RefMut},
     collections::{HashMap, HashSet},
+    sync::Mutex,
 };
+
+use thread_local::ThreadLocal;
 
 use crate::{
     commands::command_queue::{CommandQueue, WorldCommand},
@@ -81,15 +85,15 @@ impl_component_tuple!(A, B, C, D, E, F, G, H, I, J, K);
 impl_component_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
 impl_component_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M);
 
-struct SpawnCommand<T: ComponentTuple> {
-    components: T,
+pub(crate) struct SpawnCommand<T: ComponentTuple> {
+    pub(crate) components: T,
 }
 
 impl<T: ComponentTuple> WorldCommand for SpawnCommand<T> {
     fn apply(self, world: &mut World) {
-        let arch_id = world.archetypes.get_or_create_from_generic::<T>();
+        let arch_id = world.archetypes_manager.get_or_create_from_generic::<T>();
         let arch = world
-            .archetypes
+            .archetypes_manager
             .get_mut(arch_id)
             .expect("Archetype generation failed");
         let next_idx = arch.entities.len();
@@ -149,7 +153,11 @@ impl DespawnCommand {
             let cell = &vec[target_registry_idx];
 
             if cell.handle_count.load(std::sync::atomic::Ordering::Relaxed) > 0 {
-                let types_names = &world.archetypes.get(cell.archetype_id).unwrap().type_names;
+                let types_names = &&world
+                    .archetypes_manager
+                    .get(cell.archetype_id)
+                    .unwrap()
+                    .type_names;
                 panic!(
                     "Safety Violation: Attempted to despawn an Entity while active handles are still held! of archetype:\n{:?}",
                     types_names
@@ -160,7 +168,7 @@ impl DespawnCommand {
         };
 
         let arch = world
-            .archetypes
+            .archetypes_manager
             .get_mut(arch_id)
             .expect("Target archetype missing");
         let last_idx = (arch.entities.len() - 1) as u32;
@@ -192,9 +200,9 @@ impl DespawnCommand {
     }
 }
 
-struct AddComponentsCommand<T: ComponentTuple> {
-    entity: Entity,
-    components: T,
+pub(crate) struct AddComponentsCommand<T: ComponentTuple> {
+    pub(crate) entity: Entity,
+    pub(crate) components: T,
 }
 
 impl<T: ComponentTuple> WorldCommand for AddComponentsCommand<T> {
@@ -211,12 +219,16 @@ impl<T: ComponentTuple> WorldCommand for AddComponentsCommand<T> {
         let incoming_ids = T::get_type_ids();
 
         let new_arch_id = if let Some(id) = world
-            .archetypes
+            .archetypes_manager
             .find_id_by_combining(old_arch_id, incoming_ids)
         {
             id
         } else {
-            let old_arch = world.archetypes.archetypes.get(&old_arch_id).unwrap();
+            let old_arch = world
+                .archetypes_manager
+                .archetypes
+                .get(&old_arch_id)
+                .unwrap();
             let mut new_types = old_arch.types.clone();
             for id in incoming_ids {
                 new_types.insert(*id);
@@ -235,7 +247,7 @@ impl<T: ComponentTuple> WorldCommand for AddComponentsCommand<T> {
         }
 
         unsafe {
-            let map_ptr = &mut world.archetypes.archetypes
+            let map_ptr = &mut world.archetypes_manager.archetypes
                 as *mut std::collections::HashMap<ArchetypeId, Archetype>;
             let old_arch = (*map_ptr)
                 .get_mut(&old_arch_id)
@@ -298,9 +310,9 @@ impl<T: ComponentTuple> WorldCommand for AddComponentsCommand<T> {
     }
 }
 
-struct RemoveComponentsCommand<T: ComponentTuple> {
-    entity: crate::entity::Entity,
-    _marker: std::marker::PhantomData<T>,
+pub(crate) struct RemoveComponentsCommand<T: ComponentTuple> {
+    pub(crate) entity: crate::entity::Entity,
+    pub(crate) _marker: std::marker::PhantomData<T>,
 }
 
 impl<T: ComponentTuple> WorldCommand for RemoveComponentsCommand<T> {
@@ -317,12 +329,16 @@ impl<T: ComponentTuple> WorldCommand for RemoveComponentsCommand<T> {
         let removed_ids = T::get_type_ids();
 
         let new_arch_id = if let Some(id) = world
-            .archetypes
+            .archetypes_manager
             .find_id_by_subtracting(old_arch_id, removed_ids)
         {
             id
         } else {
-            let old_arch = world.archetypes.archetypes.get(&old_arch_id).unwrap();
+            let old_arch = world
+                .archetypes_manager
+                .archetypes
+                .get(&old_arch_id)
+                .unwrap();
             let mut new_types = old_arch.types.clone();
             for id in removed_ids {
                 new_types.remove(id);
@@ -341,7 +357,7 @@ impl<T: ComponentTuple> WorldCommand for RemoveComponentsCommand<T> {
         }
 
         unsafe {
-            let map_ptr = &mut world.archetypes.archetypes
+            let map_ptr = &mut world.archetypes_manager.archetypes
                 as *mut std::collections::HashMap<ArchetypeId, Archetype>;
 
             let old_arch = (*map_ptr)
@@ -407,25 +423,12 @@ impl<T: ComponentTuple> WorldCommand for RemoveComponentsCommand<T> {
     }
 }
 
-impl SystemParam for Commands<'_> {
-    fn get_access() -> ParamAccess {
-        let mut access = ParamAccess {
-            ..Default::default()
-        };
-        access.commands_accessed.push(TypeId::of::<Commands>());
-        access
-    }
-    fn extract(world: &mut World, _system_data: &mut FunctionData) -> Self {
-        let ptr = &world.commands as *const CommandBuffer as *mut CommandBuffer;
-        Commands {
-            commands: unsafe { ptr.as_mut().unwrap() },
-        }
-    }
-}
-
 pub(crate) struct CommandBuffer {
     pub(crate) queue: CommandQueue,
     pub(crate) pending_despawns: HashSet<DespawnCommand>,
+    pub(crate) local_channels: ThreadLocal<RefCell<CommandQueue>>,
+    pub(crate) local_despawns: ThreadLocal<RefCell<HashSet<DespawnCommand>>>,
+    pub(crate) merge_lock: Mutex<()>,
 }
 
 impl CommandBuffer {
@@ -433,17 +436,53 @@ impl CommandBuffer {
         Self {
             queue: CommandQueue::new(),
             pending_despawns: HashSet::new(),
+            local_channels: ThreadLocal::new(),
+            local_despawns: ThreadLocal::new(),
+            merge_lock: Mutex::new(()),
         }
     }
 }
 
 pub struct Commands<'a> {
-    commands: &'a mut CommandBuffer,
+    pub(crate) local_queue: RefMut<'a, CommandQueue>,
+    pub(crate) local_despawns: RefMut<'a, HashSet<DespawnCommand>>,
+    pub(crate) master_buffer_address: usize,
+}
+
+impl<'a> SystemParam for Commands<'a> {
+    fn get_access() -> ParamAccess {
+        let mut access = ParamAccess::default();
+        access.commands_accessed.push(TypeId::of::<Commands>());
+        access
+    }
+
+    fn extract(world: &mut World, _data: &mut FunctionData) -> Self {
+        unsafe {
+            let master_buffer_ptr = std::ptr::addr_of_mut!(world.commands);
+            let master_buffer_address = master_buffer_ptr as usize;
+
+            let master_ref = &mut *master_buffer_ptr;
+
+            let q_cell = master_ref
+                .local_channels
+                .get_or(|| RefCell::new(CommandQueue::new()));
+
+            let d_cell = master_ref
+                .local_despawns
+                .get_or(|| RefCell::new(HashSet::new()));
+
+            Self {
+                local_queue: q_cell.borrow_mut(),
+                local_despawns: d_cell.borrow_mut(),
+                master_buffer_address,
+            }
+        }
+    }
 }
 
 impl Commands<'_> {
     fn push<C: WorldCommand + 'static>(&mut self, command: C) {
-        self.commands.queue.push(command);
+        self.local_queue.push(command);
     }
 
     pub fn spawn<T: ComponentTuple>(&mut self, components: T) {
@@ -451,9 +490,7 @@ impl Commands<'_> {
     }
 
     pub fn despawn(&mut self, entity: Entity) {
-        self.commands
-            .pending_despawns
-            .insert(DespawnCommand { entity });
+        self.local_despawns.insert(DespawnCommand { entity });
     }
 
     pub fn add_components<C: ComponentTuple>(&mut self, entity: Entity, components: C) {
@@ -468,6 +505,36 @@ impl Commands<'_> {
     }
 
     pub fn despawn_iter(&self) -> std::collections::hash_set::Iter<'_, DespawnCommand> {
-        self.commands.pending_despawns.iter()
+        self.local_despawns.iter()
+    }
+}
+
+impl<'a> Drop for Commands<'a> {
+    fn drop(&mut self) {
+        if self.local_queue.is_empty() && self.local_despawns.is_empty() {
+            return;
+        }
+
+        unsafe {
+            let master_buffer_ptr = self.master_buffer_address as *mut CommandBuffer;
+            let _guard = (*master_buffer_ptr).merge_lock.lock().unwrap();
+
+            if !self.local_queue.is_empty() {
+                let queue_offset = std::mem::offset_of!(CommandBuffer, queue);
+                let queue_ptr =
+                    (master_buffer_ptr as *mut u8).add(queue_offset) as *mut CommandQueue;
+
+                (*queue_ptr).merge(&mut self.local_queue);
+                self.local_queue.clear_bytes();
+            }
+
+            if !self.local_despawns.is_empty() {
+                let despawns_offset = std::mem::offset_of!(CommandBuffer, pending_despawns);
+                let despawns_ptr = (master_buffer_ptr as *mut u8).add(despawns_offset)
+                    as *mut HashSet<DespawnCommand>;
+
+                (*despawns_ptr).extend(self.local_despawns.drain());
+            }
+        }
     }
 }

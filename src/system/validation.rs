@@ -1,12 +1,8 @@
 use std::sync::atomic::Ordering;
 
 use crate::{
-    query::{
-        filter::Filter,
-        params::WorldQuery,
-        query::Query,
-        resources::{Res, ResMut},
-    },
+    query::{filter::Filter, params::WorldQuery, query::Query},
+    resources::{Res, ResMut},
     world::storage::{CURRENT_FRAME_GENERATION, World},
 };
 
