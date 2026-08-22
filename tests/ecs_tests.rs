@@ -151,15 +151,17 @@ fn verify_logical_queries(
     assert_eq!(not_count, 1);
 }
 
-#[test]
-fn test_query_filter_logic() {
-    let mut app = App::new();
-    app.add_plugins(DefaultSchedulesPlugin)
-        .add_systems(Startup::id(), spawn_filter_targets)
-        .add_systems(Update::id(), verify_logical_queries);
+rusty_fork_test! {
+    #[test]
+    fn test_query_filter_logic() {
+        let mut app = App::new();
+        app.add_plugins(DefaultSchedulesPlugin)
+            .add_systems(Startup::id(), spawn_filter_targets)
+            .add_systems(Update::id(), verify_logical_queries);
 
-    app.set_runner(test_runner_once);
-    app.run();
+        app.set_runner(test_runner_once);
+        app.run();
+    }
 }
 
 fn spawn_tracking_entity(mut commands: Commands) {

@@ -96,7 +96,6 @@ impl App {
                 "❌ VENIX ARCHITECTURE VIOLATION: Multiple App instances detected!\nEnsure you only instantiate exactly one App::new() across your entire binary runtime."
             );
         }
-        crate::query::changed::TRACKED_COMPONENTS.get_or_init(Vec::new);
         let mut schedules = Vec::new();
         schedules.push(Schedule::new(Startup));
         let function = |app: &mut App| {

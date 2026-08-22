@@ -115,7 +115,7 @@ impl World {
         let current = CURRENT_FRAME_GENERATION.load(Ordering::Relaxed);
         let next = if current == 1 { 2 } else { 1 };
         CURRENT_FRAME_GENERATION.store(next, Ordering::Relaxed);
-        let tracked = TRACKED_COMPONENTS.get().unwrap();
+        let tracked = TRACKED_COMPONENTS.read().unwrap();
 
         for archetype in self.archetypes_manager.archetypes.values_mut() {
             unsafe {

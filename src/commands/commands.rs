@@ -127,7 +127,7 @@ impl<T: ComponentTuple> WorldCommand for SpawnCommand<T> {
         self.components.push_to_archetype(arch);
         unsafe {
             let columns = &mut *arch.columns.get();
-            let tracked = TRACKED_COMPONENTS.get().unwrap();
+            let tracked = TRACKED_COMPONENTS.read().unwrap();
 
             for meta in tracked.iter() {
                 if let Some(marker_column) = columns.get_mut(&meta.marker_id) {
@@ -280,7 +280,7 @@ impl<T: ComponentTuple> WorldCommand for AddComponentsCommand<T> {
                 }
             }
             let columns = &mut *new_arch.columns.get();
-            let tracked = TRACKED_COMPONENTS.get().unwrap();
+            let tracked = TRACKED_COMPONENTS.read().unwrap();
 
             self.components.push_to_archetype(new_arch);
             for meta in tracked.iter() {
@@ -391,7 +391,7 @@ impl<T: ComponentTuple> WorldCommand for RemoveComponentsCommand<T> {
                 }
             }
 
-            let tracked = TRACKED_COMPONENTS.get().unwrap();
+            let tracked = TRACKED_COMPONENTS.read().unwrap();
 
             for id in removed_ids {
                 if let Some(old_col) = old_cols.get_mut(id) {

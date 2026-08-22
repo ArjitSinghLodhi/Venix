@@ -7,7 +7,7 @@ use crate::system::validation::{AccessHashSet, AccessVec, FunctionData};
 use crate::world::archetypes::{Archetype, ComponentColumn};
 use crate::world::storage::CURRENT_FRAME_GENERATION;
 use std::any::TypeId;
-use std::sync::OnceLock;
+use std::sync::RwLock;
 
 #[derive(Debug)]
 pub(crate) struct TrackedComponentMeta {
@@ -18,12 +18,10 @@ pub(crate) struct TrackedComponentMeta {
     pub(crate) clear_column_markers: unsafe fn(&mut dyn std::any::Any),
 }
 
-pub(crate) static TRACKED_COMPONENTS: OnceLock<Vec<TrackedComponentMeta>> = OnceLock::new();
+pub(crate) static TRACKED_COMPONENTS: RwLock<Vec<TrackedComponentMeta>> = RwLock::new(Vec::new());
 
 pub(crate) fn register_tracked_component<T: 'static + Send + Sync>() {
-    let static_ptr = &TRACKED_COMPONENTS as *const OnceLock<Vec<TrackedComponentMeta>>
-        as *mut OnceLock<Vec<TrackedComponentMeta>>;
-    let tracked = unsafe { (*static_ptr).get_mut().unwrap() };
+    let mut tracked = TRACKED_COMPONENTS.write().unwrap();
 
     let component_id = TypeId::of::<T>();
 
