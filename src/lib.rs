@@ -3,11 +3,14 @@ pub mod commands;
 pub mod entity;
 pub mod query;
 mod registry;
+pub mod resources;
 pub mod schedule;
 mod system;
 mod world;
+
+pub use fxhash;
+pub use indexmap;
 pub use rayon;
-pub mod resources;
 
 pub mod prelude {
     pub use crate::app::{

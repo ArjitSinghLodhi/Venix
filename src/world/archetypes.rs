@@ -64,7 +64,7 @@ unsafe impl Sync for Archetype {}
 unsafe impl Send for Archetype {}
 
 impl Archetype {
-    pub fn new(
+    pub(crate) fn new(
         id: ArchetypeId,
         types: FxHashSet<TypeId>,
         columns: IndexMap<TypeId, ComponentColumn, FxBuildHasher>,

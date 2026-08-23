@@ -16,7 +16,7 @@ use crate::{
 
 pub(crate) static CURRENT_FRAME_GENERATION: AtomicU8 = AtomicU8::new(1);
 pub struct World {
-    pub(crate) archetypes_manager: ArchetypeManager,
+    pub archetypes_manager: ArchetypeManager,
     pub(crate) resources:
         FxHashMap<std::any::TypeId, std::cell::UnsafeCell<Box<dyn std::any::Any>>>,
     pub(crate) commands: Arc<CommandBuffer>,
