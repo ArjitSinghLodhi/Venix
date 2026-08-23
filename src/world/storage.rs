@@ -1,7 +1,10 @@
+use fxhash::FxHashMap;
 use std::{
     any::{TypeId, type_name},
-    collections::{HashMap, HashSet},
-    sync::atomic::{AtomicU8, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+    },
 };
 
 use crate::{
@@ -14,19 +17,20 @@ use crate::{
 pub(crate) static CURRENT_FRAME_GENERATION: AtomicU8 = AtomicU8::new(1);
 pub struct World {
     pub(crate) archetypes_manager: ArchetypeManager,
-    pub(crate) resources: HashMap<std::any::TypeId, std::cell::UnsafeCell<Box<dyn std::any::Any>>>,
-    pub(crate) commands: CommandBuffer,
+    pub(crate) resources:
+        FxHashMap<std::any::TypeId, std::cell::UnsafeCell<Box<dyn std::any::Any>>>,
+    pub(crate) commands: Arc<CommandBuffer>,
     pub(crate) free_indices_list: Vec<u32>,
 }
 
 impl World {
     pub fn new() -> Self {
         let archetypes_manager = ArchetypeManager::new();
-        let resources = HashMap::new();
+        let resources = FxHashMap::default();
         let world = Self {
             archetypes_manager,
             resources,
-            commands: CommandBuffer::new(),
+            commands: Arc::new(CommandBuffer::new()),
             free_indices_list: Vec::new(),
         };
         world
@@ -39,15 +43,6 @@ impl World {
         &mut self,
     ) -> ArchetypeId {
         self.archetypes_manager.get_or_create_from_generic::<T>()
-    }
-
-    pub(crate) fn get_or_create_archetype_from_set(
-        &mut self,
-        types_set: std::collections::HashSet<std::any::TypeId>,
-        types_names_set: HashSet<&'static str>,
-    ) -> ArchetypeId {
-        self.archetypes_manager
-            .get_or_create_from_set(types_set, types_names_set)
     }
 
     pub fn insert_resource<T: 'static>(&mut self, resource: T) {
@@ -95,16 +90,16 @@ impl World {
     }
 
     pub fn apply_commands(&mut self) {
-        let mut commands = std::mem::replace(&mut self.commands, CommandBuffer::new());
+        let commands = std::mem::replace(&mut self.commands, CommandBuffer::new().into());
         let registry_ptr = std::ptr::addr_of_mut!(REGISTRY);
         let vec = &mut unsafe { &mut *registry_ptr }.0;
-        commands.data.queue.apply(self);
-        for target in commands.data.despawns.iter() {
+        commands.data.write().unwrap().queue.apply(self);
+        for target in commands.data.write().unwrap().despawns.iter() {
             vec[target.entity.registry_index as usize]
                 .handle_count
                 .fetch_sub(1, Ordering::Relaxed);
         }
-        for despawn_target in commands.data.despawns.drain() {
+        for despawn_target in commands.data.write().unwrap().despawns.drain() {
             despawn_target.apply(self);
         }
         self.free_indices_list.sort_by(|a, b| b.cmp(a));

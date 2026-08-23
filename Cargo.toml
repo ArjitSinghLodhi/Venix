@@ -1,6 +1,6 @@
 [package]
 name = "venix"
-version = "1.0.9"
+version = "1.1.0"
 edition = "2024"
 description = "A high-performance, archetype-based ECS engine written in Rust."
 readme = "README.md"
@@ -10,6 +10,8 @@ keywords = ["ecs", "archetype", "simulation", "parallel"]
 categories = ["game-engines", "development-tools"]
 
 [dependencies]
+fxhash = "0.2.1"
+indexmap = "2.14.0"
 rayon = "1.12.0"
 thread_local = "1.1.10"
 

@@ -1,4 +1,6 @@
-use std::{any::TypeId, collections::HashSet, sync::atomic::Ordering};
+use std::{any::TypeId, sync::atomic::Ordering};
+
+use fxhash::FxHashSet;
 
 use crate::{
     entity::Entity,
@@ -12,7 +14,7 @@ pub trait WorldQuery {
     type ReadOnlyItem<'w>;
     type Fetch: Copy;
 
-    fn matches(types: &HashSet<TypeId>) -> bool;
+    fn matches(types: &FxHashSet<TypeId>) -> bool;
     unsafe fn init_fetch(archetype: &Archetype, systems_data: &mut FunctionData) -> Self::Fetch;
     fn collect_access(
         reads: &mut AccessVec<std::any::TypeId>,
@@ -27,7 +29,7 @@ impl<T: 'static> WorldQuery for &T {
     type ReadOnlyItem<'w> = &'w T;
     type Fetch = *const T;
 
-    fn matches(types: &HashSet<TypeId>) -> bool {
+    fn matches(types: &FxHashSet<TypeId>) -> bool {
         types.contains(&TypeId::of::<T>())
     }
     fn collect_access(
@@ -52,7 +54,7 @@ impl<T: 'static> WorldQuery for &mut T {
     type ReadOnlyItem<'w> = &'w T;
     type Fetch = (*mut T, *mut ChangedMarker<T>, u8, bool);
 
-    fn matches(types: &HashSet<TypeId>) -> bool {
+    fn matches(types: &FxHashSet<TypeId>) -> bool {
         types.contains(&TypeId::of::<T>())
     }
 
@@ -105,7 +107,7 @@ impl WorldQuery for Entity {
     type ReadOnlyItem<'w> = &'w Entity;
     type Fetch = *const Entity;
 
-    fn matches(_types: &HashSet<TypeId>) -> bool {
+    fn matches(_types: &FxHashSet<TypeId>) -> bool {
         true
     }
     fn collect_access(_reads: &mut AccessVec<TypeId>, _writes: &mut AccessVec<TypeId>) {}
@@ -125,7 +127,7 @@ impl<T: 'static> WorldQuery for Option<&T> {
     type ReadOnlyItem<'w> = Option<&'w T>;
     type Fetch = Option<*const T>;
 
-    fn matches(_types: &HashSet<TypeId>) -> bool {
+    fn matches(_types: &FxHashSet<TypeId>) -> bool {
         true
     }
 
@@ -162,7 +164,7 @@ impl<T: 'static> WorldQuery for Option<&mut T> {
     type ReadOnlyItem<'w> = Option<&'w T>;
     type Fetch = (Option<*mut T>, *mut ChangedMarker<T>, u8, bool);
 
-    fn matches(_types: &HashSet<TypeId>) -> bool {
+    fn matches(_types: &FxHashSet<TypeId>) -> bool {
         true
     }
 
@@ -245,7 +247,7 @@ macro_rules! impl_world_query_tuple {
             type ReadOnlyItem<'w> = ($($name::ReadOnlyItem<'w>,)*);
             type Fetch = ($($name::Fetch,)*);
 
-            fn matches(types: &HashSet<TypeId>) -> bool { $($name::matches(types))&&* }
+            fn matches(types: &FxHashSet<TypeId>) -> bool { $($name::matches(types))&&* }
             unsafe fn init_fetch(archetype: &Archetype, systems_data: &mut FunctionData) -> Self::Fetch { unsafe { ($($name::init_fetch(archetype, systems_data),)*) } }
             unsafe fn fetch_mut<'w>(fetch: Self::Fetch, index: usize) -> Self::Item<'w> {
                 unsafe {($($name::fetch_mut(fetch.$idx, index),)*)}

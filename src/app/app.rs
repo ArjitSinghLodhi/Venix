@@ -1,8 +1,10 @@
 use std::{
     any::TypeId,
-    collections::{HashMap, HashSet, VecDeque},
+    collections::VecDeque,
     sync::atomic::{AtomicBool, Ordering},
 };
+
+use fxhash::{FxBuildHasher, FxHashMap, FxHashSet};
 
 use crate::{
     app::plugin::PluginsBuildAll,
@@ -232,7 +234,7 @@ impl App {
     }
 
     fn configure_plugins(&mut self) {
-        let mut seen_plugins = HashSet::new();
+        let mut seen_plugins = FxHashSet::default();
 
         while !self.plugins.is_empty() {
             let current_batch = std::mem::take(&mut self.plugins);
@@ -281,7 +283,8 @@ impl App {
     fn configure_schedules(&mut self) {
         let unarranged = std::mem::take(&mut self.schedules);
 
-        let mut schedule_map: HashMap<TypeId, Schedule> = HashMap::with_capacity(unarranged.len());
+        let mut schedule_map: FxHashMap<TypeId, Schedule> =
+            FxHashMap::with_capacity_and_hasher(unarranged.len(), FxBuildHasher::new());
         for s in unarranged {
             let id = s.schedule.id_from_self();
             if schedule_map.contains_key(&id.id) {
@@ -301,9 +304,9 @@ impl App {
             );
         }
 
-        let mut adjacency_list: HashMap<TypeId, Vec<TypeId>> = HashMap::new();
-        let mut in_degree: HashMap<TypeId, usize> = HashMap::new();
-        let mut unique_edges: HashSet<(TypeId, TypeId)> = HashSet::new();
+        let mut adjacency_list: FxHashMap<TypeId, Vec<TypeId>> = FxHashMap::default();
+        let mut in_degree: FxHashMap<TypeId, usize> = FxHashMap::default();
+        let mut unique_edges: FxHashSet<(TypeId, TypeId)> = FxHashSet::default();
 
         for &id in schedule_map.keys() {
             in_degree.insert(id, 0);

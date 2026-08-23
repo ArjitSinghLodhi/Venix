@@ -1,28 +1,30 @@
 use std::{
-    any::{TypeId, type_name},
+    any::{Any, TypeId, type_name},
     borrow::Borrow,
     cell::UnsafeCell,
-    collections::{HashMap, HashSet},
     hash::{BuildHasher, Hash, Hasher},
 };
+
+use fxhash::{FxBuildHasher, FxHashMap, FxHashSet};
+use indexmap::{IndexMap, IndexSet};
 
 use crate::{
     commands::commands::ComponentTuple, entity::Entity, query::changed::TRACKED_COMPONENTS,
 };
 
-pub(crate) trait AnyColumn: std::any::Any + Send + Sync {
+pub(crate) trait AnyColumn: Any {
     unsafe fn swap_remove_erased(&mut self, idx: usize);
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
     unsafe fn move_row_erased(&mut self, index: usize, dst: *mut dyn AnyColumn);
     fn clone_empty(&self) -> Box<dyn AnyColumn>;
 }
 
-impl<T: 'static + Send + Sync> AnyColumn for Vec<T> {
+impl<T: 'static> AnyColumn for Vec<T> {
     unsafe fn swap_remove_erased(&mut self, idx: usize) {
         self.swap_remove(idx);
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     unsafe fn move_row_erased(&mut self, index: usize, dst: *mut dyn AnyColumn) {
@@ -36,7 +38,7 @@ impl<T: 'static + Send + Sync> AnyColumn for Vec<T> {
 }
 
 #[derive(Clone, Copy, PartialEq, Debug, Eq, Hash)]
-pub struct ArchetypeId(u32);
+pub(crate) struct ArchetypeId(u32);
 
 impl ArchetypeId {
     pub(crate) fn new(id: u32) -> ArchetypeId {
@@ -53,10 +55,10 @@ pub struct ComponentColumn {
 
 pub struct Archetype {
     pub(crate) id: ArchetypeId,
-    pub(crate) types: std::collections::HashSet<std::any::TypeId>,
+    pub(crate) types: FxHashSet<TypeId>,
     pub(crate) entities: Vec<Entity>,
-    pub(crate) columns: UnsafeCell<HashMap<TypeId, ComponentColumn>>,
-    pub(crate) type_names: HashSet<&'static str>,
+    pub(crate) columns: UnsafeCell<IndexMap<TypeId, ComponentColumn, FxBuildHasher>>,
+    pub(crate) type_names: IndexSet<&'static str, FxBuildHasher>,
 }
 
 unsafe impl Sync for Archetype {}
@@ -65,16 +67,16 @@ unsafe impl Send for Archetype {}
 impl Archetype {
     pub(crate) fn new(
         id: ArchetypeId,
-        types: std::collections::HashSet<std::any::TypeId>,
-        columns: std::collections::HashMap<std::any::TypeId, ComponentColumn>,
-        type_names: HashSet<&'static str>,
+        types: FxHashSet<TypeId>,
+        columns: IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
+        type_names: IndexSet<&'static str, FxBuildHasher>,
     ) -> Self {
         Self {
             id,
             types,
             entities: Vec::new(),
             columns: std::cell::UnsafeCell::new(columns),
-            type_names: type_names,
+            type_names,
         }
     }
 
@@ -97,7 +99,7 @@ impl Archetype {
 
 #[derive(Eq, PartialEq, Hash)]
 #[repr(transparent)]
-pub struct ComponentIdSlice([TypeId]);
+pub(crate) struct ComponentIdSlice([TypeId]);
 
 impl From<&[TypeId]> for &ComponentIdSlice {
     fn from(slice: &[TypeId]) -> Self {
@@ -113,90 +115,79 @@ impl Borrow<ComponentIdSlice> for Box<[TypeId]> {
 
 #[derive(Default)]
 pub(crate) struct ArchetypeManager {
-    index: HashMap<u64, ArchetypeId>,
-    pub(crate) archetypes: HashMap<ArchetypeId, Archetype>,
+    index: FxHashMap<u64, ArchetypeId>,
+    pub(crate) archetypes: FxHashMap<ArchetypeId, Archetype>,
     next_id: u32,
 }
 
 impl ArchetypeManager {
     pub(crate) fn new() -> Self {
         Self {
-            index: HashMap::new(),
-            archetypes: HashMap::new(),
+            index: FxHashMap::default(),
+            archetypes: FxHashMap::default(),
             next_id: 0,
         }
     }
-    pub(crate) fn find_id_by_combining(
+
+    fn calculate_hash(&self, types: &FxHashSet<TypeId>) -> u64 {
+        let mut combined_hash: u64 = 0;
+        let hasher_builder = self.index.hasher();
+        for type_id in types {
+            let mut state = hasher_builder.build_hasher();
+            type_id.hash(&mut state);
+            combined_hash ^= state.finish();
+        }
+        combined_hash
+    }
+
+    pub(crate) fn sync_tracking_markers(&self, types: &mut FxHashSet<TypeId>) {
+        if let Ok(tracked) = TRACKED_COMPONENTS.read() {
+            for meta in tracked.iter() {
+                if types.contains(&meta.component_id) {
+                    types.insert(meta.marker_id);
+                } else {
+                    types.remove(&meta.marker_id);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn find_target_id_for_addition(
         &self,
         old_id: ArchetypeId,
         incoming_ids: &[TypeId],
     ) -> Option<ArchetypeId> {
         let old_arch = self.archetypes.get(&old_id)?;
-        let hasher_builder = self.index.hasher();
-        let mut combined_hash: u64 = 0;
-
-        for type_id in &old_arch.types {
-            let mut state = hasher_builder.build_hasher();
-            type_id.hash(&mut state);
-            combined_hash ^= state.finish();
+        let mut target_types = old_arch.types.clone();
+        for id in incoming_ids {
+            target_types.insert(*id);
         }
-
-        for type_id in incoming_ids {
-            let mut state = hasher_builder.build_hasher();
-            type_id.hash(&mut state);
-            combined_hash ^= state.finish();
-        }
-
-        self.index.get(&combined_hash).copied()
+        self.sync_tracking_markers(&mut target_types);
+        let hash = self.calculate_hash(&target_types);
+        self.index.get(&hash).copied()
     }
-    pub(crate) fn find_id_by_subtracting(
+
+    pub(crate) fn find_target_id_for_subtraction(
         &self,
         old_id: ArchetypeId,
         removed_ids: &[TypeId],
     ) -> Option<ArchetypeId> {
         let old_arch = self.archetypes.get(&old_id)?;
-        let hasher_builder = self.index.hasher();
-        let mut combined_hash: u64 = 0;
-
-        for type_id in &old_arch.types {
-            let mut state = hasher_builder.build_hasher();
-            type_id.hash(&mut state);
-            combined_hash ^= state.finish();
+        let mut target_types = old_arch.types.clone();
+        for id in removed_ids {
+            target_types.remove(id);
         }
-        for type_id in removed_ids {
-            let mut state = hasher_builder.build_hasher();
-            type_id.hash(&mut state);
-            combined_hash ^= state.finish();
-        }
-
-        self.index.get(&combined_hash).copied()
+        self.sync_tracking_markers(&mut target_types);
+        let hash = self.calculate_hash(&target_types);
+        self.index.get(&hash).copied()
     }
-    pub(crate) fn find_id_from_slice(&self, types_slice: &[TypeId]) -> Option<ArchetypeId> {
-        let mut order_independent_hash: u64 = 0;
-        let hasher_builder = self.index.hasher();
 
-        for type_id in types_slice {
-            let mut state = hasher_builder.build_hasher();
-            type_id.hash(&mut state);
-            order_independent_hash ^= state.finish();
-        }
-
-        self.index.get(&order_independent_hash).copied()
-    }
     pub(crate) fn get_or_create_from_set(
         &mut self,
-        types_set: HashSet<TypeId>,
-        types_names_set: HashSet<&'static str>,
+        types_set: FxHashSet<TypeId>,
+        types_names_set: IndexSet<&'static str, FxBuildHasher>,
     ) -> ArchetypeId {
-        let mut order_independent_hash: u64 = 0;
-        let hasher_builder = self.index.hasher();
-
-        for type_id in &types_set {
-            let mut state = hasher_builder.build_hasher();
-            type_id.hash(&mut state);
-            order_independent_hash ^= state.finish();
-        }
-
+        let order_independent_hash = self.calculate_hash(&types_set);
         if let Some(id) = self.index.get(&order_independent_hash).copied() {
             return id;
         }
@@ -204,75 +195,64 @@ impl ArchetypeManager {
         let new_id = ArchetypeId::new(self.next_id);
         self.next_id += 1;
 
-        let columns = HashMap::new();
+        let columns = IndexMap::with_hasher(FxBuildHasher::default());
         let new_arch = Archetype::new(new_id, types_set, columns, types_names_set);
 
         self.index.insert(order_independent_hash, new_id);
         self.archetypes.insert(new_id, new_arch);
-
         new_id
     }
 
     pub(crate) fn get_or_create_from_generic<T: ComponentTuple>(&mut self) -> ArchetypeId {
         let incoming_ids = T::get_type_ids();
-        if let Some(id) = self.find_id_from_slice(incoming_ids) {
-            return id;
-        }
-        let incoming_names = T::get_type_names();
-        let names_ref = incoming_names.as_ref();
-
-        let mut types_set = HashSet::with_capacity(incoming_ids.len());
+        let mut types_set =
+            FxHashSet::with_capacity_and_hasher(incoming_ids.len(), FxBuildHasher::default());
         for &id in incoming_ids {
             types_set.insert(id);
         }
+        self.sync_tracking_markers(&mut types_set);
 
-        let mut types_names_set = HashSet::with_capacity(names_ref.len());
-        for &name in names_ref {
-            types_names_set.insert(name);
+        let order_independent_hash = self.calculate_hash(&types_set);
+        if let Some(id) = self.index.get(&order_independent_hash).copied() {
+            return id;
         }
 
-        let mut order_independent_hash: u64 = 0;
-        let hasher_builder = self.index.hasher();
-
-        for type_id in &types_set {
-            let mut state = hasher_builder.build_hasher();
-            type_id.hash(&mut state);
-            order_independent_hash ^= state.finish();
+        let incoming_names = T::get_type_names();
+        let names_ref = incoming_names.as_ref();
+        let mut types_names_set =
+            IndexSet::with_capacity_and_hasher(names_ref.len(), FxBuildHasher::default());
+        for &name in names_ref {
+            types_names_set.insert(name);
         }
 
         let new_id = ArchetypeId(self.next_id);
         self.next_id += 1;
 
-        let mut columns = HashMap::new();
+        let mut columns = IndexMap::with_hasher(FxBuildHasher::default());
         T::create_empty_columns(&mut columns);
-        {
-            let tracked = TRACKED_COMPONENTS.read().unwrap();
-            let mut injections = Vec::new();
 
-            for meta in tracked.iter() {
-                if columns.contains_key(&meta.component_id) {
-                    injections.push((meta.marker_id, (meta.create_marker_column)()));
-                }
-            }
-
-            for (marker_id, column_wrapper) in injections {
-                columns.insert(marker_id, column_wrapper);
-                types_set.insert(marker_id);
+        if let Ok(tracked) = TRACKED_COMPONENTS.read() {
+            let marker_columns: Vec<_> = tracked
+                .iter()
+                .filter(|m| types_set.contains(&m.marker_id))
+                .map(|m| (m.marker_id, m.create_marker_column))
+                .collect();
+            for (marker_id, create_fn) in marker_columns {
+                columns.insert(marker_id, create_fn());
             }
         }
-        let new_arch = Archetype::new(new_id, types_set, columns, types_names_set);
 
+        let new_arch = Archetype::new(new_id, types_set, columns, types_names_set);
         self.index.insert(order_independent_hash, new_id);
         self.archetypes.insert(new_id, new_arch);
-
         new_id
-    }
-
-    pub(crate) fn get_mut(&mut self, id: ArchetypeId) -> Option<&mut Archetype> {
-        self.archetypes.get_mut(&id)
     }
 
     pub(crate) fn get(&self, id: ArchetypeId) -> Option<&Archetype> {
         self.archetypes.get(&id)
+    }
+
+    pub(crate) fn get_mut(&mut self, id: ArchetypeId) -> Option<&mut Archetype> {
+        self.archetypes.get_mut(&id)
     }
 }

@@ -1,4 +1,6 @@
-use std::{any::TypeId, collections::HashSet, hash::Hash};
+use std::{any::TypeId, hash::Hash};
+
+use fxhash::FxHashSet;
 
 use crate::{
     query::{filter::Filter, params::WorldQuery, query::Query},
@@ -7,13 +9,13 @@ use crate::{
 };
 
 pub struct AccessHashSet<T: Eq + Hash> {
-    pub(crate) set: HashSet<T>,
+    pub(crate) set: FxHashSet<T>,
 }
 
 impl<T: Eq + Hash> AccessHashSet<T> {
     pub(crate) fn new() -> Self {
         Self {
-            set: HashSet::new(),
+            set: FxHashSet::default(),
         }
     }
 

@@ -1,8 +1,12 @@
-use crate::commands::commands::{CommandBuffer, Commands, CommandsBufferData};
+use crate::commands::commands::{
+    CommandBuffer, Commands, CommandsBufferData, CommandsOrigin, LocalSlot,
+};
 use crate::extensions::{ParamAccess, SystemParam};
 use crate::system::validation::FunctionData;
 use crate::world::storage::World;
-use std::cell::RefCell;
+use std::cell::UnsafeCell;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct ParallelCommands {
     pub(crate) master_buffer_ptr: *mut CommandBuffer,
@@ -18,7 +22,7 @@ impl SystemParam for ParallelCommands {
 
     fn extract(world: &mut World, _data: &mut FunctionData) -> Self {
         Self {
-            master_buffer_ptr: &mut world.commands as *mut CommandBuffer,
+            master_buffer_ptr: Arc::as_ptr(&world.commands) as *mut CommandBuffer,
         }
     }
 }
@@ -29,30 +33,34 @@ impl ParallelCommands {
         F: for<'b> FnOnce(Commands<'b>),
     {
         unsafe {
-            let local_data_ptr = std::ptr::addr_of!((*self.master_buffer_ptr).local_data);
-            let local_data = &*local_data_ptr;
+            let slot = (*self.master_buffer_ptr).local_data.get_or(|| LocalSlot {
+                is_busy: AtomicBool::new(false),
+                data: UnsafeCell::new(CommandsBufferData::new()),
+            });
 
-            let data_cell = local_data.get_or(|| RefCell::new(CommandsBufferData::new()));
+            if slot
+                .is_busy
+                .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+            {
+                let commands = Commands {
+                    local_data: slot.data.get(),
+                    origin: CommandsOrigin::ThreadLocal(std::mem::transmute(&slot.is_busy)),
+                    master_buffer: self.master_buffer_ptr,
+                    _marker: std::marker::PhantomData,
+                };
+                f(commands);
+            } else {
+                let heap_box = Box::new(CommandsBufferData::new());
+                let heap_ptr = Box::into_raw(heap_box);
 
-            match data_cell.try_borrow_mut() {
-                Ok(data_borrow) => {
-                    let commands = Commands {
-                        local_data: data_borrow,
-                        master_buffer_ptr: self.master_buffer_ptr,
-                    };
-                    f(commands);
-                }
-                _ => {
-                    let fallback_data = CommandsBufferData::new();
-                    let fallback_data_cell = RefCell::new(fallback_data);
-
-                    let commands = Commands {
-                        local_data: fallback_data_cell.borrow_mut(),
-                        master_buffer_ptr: self.master_buffer_ptr,
-                    };
-
-                    f(commands);
-                }
+                let commands = Commands {
+                    local_data: heap_ptr,
+                    origin: CommandsOrigin::HeapFallback(heap_ptr),
+                    master_buffer: self.master_buffer_ptr,
+                    _marker: std::marker::PhantomData,
+                };
+                f(commands);
             }
         }
     }

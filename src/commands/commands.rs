@@ -1,10 +1,14 @@
 use std::{
     any::TypeId,
-    cell::{RefCell, RefMut},
-    collections::{HashMap, HashSet},
-    sync::Mutex,
+    cell::UnsafeCell,
+    sync::{
+        Arc, RwLock,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
+use fxhash::{FxBuildHasher, FxHashMap, FxHashSet};
+use indexmap::IndexMap;
 use thread_local::ThreadLocal;
 
 use crate::{
@@ -23,7 +27,7 @@ pub trait ComponentTuple: Send + Sync + 'static {
     const TYPE_IDS: &[TypeId];
     fn get_type_ids() -> &'static [TypeId];
     fn push_to_archetype(self, archetype: &mut Archetype);
-    fn create_empty_columns(columns: &mut HashMap<TypeId, ComponentColumn>);
+    fn create_empty_columns(columns: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>);
 
     type NamesArray: AsRef<[&'static str]>;
     fn get_type_names() -> Self::NamesArray;
@@ -39,7 +43,7 @@ macro_rules! impl_component_tuple {
                 Self::TYPE_IDS
             }
 
-            fn create_empty_columns(columns: &mut HashMap<TypeId, ComponentColumn>) {
+            fn create_empty_columns(columns: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>) {
                 $(
                     let id = TypeId::of::<$T>();
                     columns.insert(id, ComponentColumn {
@@ -92,48 +96,22 @@ pub(crate) struct SpawnCommand<T: ComponentTuple> {
 impl<T: ComponentTuple> WorldCommand for SpawnCommand<T> {
     fn apply(self, world: &mut World) {
         let arch_id = world.archetypes_manager.get_or_create_from_generic::<T>();
+        let next_idx = match world.archetypes_manager.get(arch_id) {
+            Some(arch) => arch.entities.len() as u32,
+            None => 0,
+        };
+        let assigned_registry_idx = alloc_registry_cell(arch_id, next_idx, world);
         let arch = world
             .archetypes_manager
             .get_mut(arch_id)
             .expect("Archetype generation failed");
-        let next_idx = arch.entities.len();
-
-        let registry_ptr = std::ptr::addr_of_mut!(REGISTRY);
-
-        let assigned_registry_idx = if let Some(recycled_idx) = world.free_indices_list.pop() {
-            unsafe {
-                let vec = &mut (*registry_ptr).0;
-                vec[recycled_idx as usize] = RegistryCell {
-                    archetype_id: arch_id,
-                    idx: next_idx as u32,
-                    handle_count: std::sync::atomic::AtomicU32::new(0),
-                };
-            }
-            recycled_idx
-        } else {
-            unsafe {
-                let vec = &mut (*registry_ptr).0;
-                let len = vec.len() as u32;
-                vec.push(RegistryCell {
-                    archetype_id: arch_id,
-                    idx: next_idx as u32,
-                    handle_count: std::sync::atomic::AtomicU32::new(0),
-                });
-                len
-            }
-        };
 
         arch.entities.push(Entity::new(assigned_registry_idx));
         self.components.push_to_archetype(arch);
+
         unsafe {
             let columns = &mut *arch.columns.get();
-            let tracked = TRACKED_COMPONENTS.read().unwrap();
-
-            for meta in tracked.iter() {
-                if let Some(marker_column) = columns.get_mut(&meta.marker_id) {
-                    (meta.push_default_marker)(marker_column);
-                }
-            }
+            initialize_spawn_markers(columns);
         }
     }
 }
@@ -155,7 +133,8 @@ impl DespawnCommand {
             if cell.handle_count.load(std::sync::atomic::Ordering::Relaxed) > 0 {
                 let types_names = &&world
                     .archetypes_manager
-                    .get(cell.archetype_id)
+                    .archetypes
+                    .get(&cell.archetype_id)
                     .unwrap()
                     .type_names;
                 panic!(
@@ -208,38 +187,16 @@ pub(crate) struct AddComponentsCommand<T: ComponentTuple> {
 impl<T: ComponentTuple> WorldCommand for AddComponentsCommand<T> {
     fn apply(self, world: &mut World) {
         let target_registry_idx = self.entity.registry_index as usize;
-        let registry_ptr = std::ptr::addr_of_mut!(REGISTRY);
-
-        let (old_arch_id, old_idx) = unsafe {
-            let vec = &mut (*registry_ptr).0;
-            let cell = &vec[target_registry_idx];
-            (cell.archetype_id, cell.idx)
-        };
-
+        let (old_arch_id, old_idx) = get_registry_location(target_registry_idx);
         let incoming_ids = T::get_type_ids();
 
         let new_arch_id = if let Some(id) = world
             .archetypes_manager
-            .find_id_by_combining(old_arch_id, incoming_ids)
+            .find_target_id_for_addition(old_arch_id, incoming_ids)
         {
             id
         } else {
-            let old_arch = world
-                .archetypes_manager
-                .archetypes
-                .get(&old_arch_id)
-                .unwrap();
-            let mut new_types = old_arch.types.clone();
-            for id in incoming_ids {
-                new_types.insert(*id);
-            }
-
-            let mut new_types_names = old_arch.type_names.clone();
-            for id in T::get_type_names().as_ref() {
-                new_types_names.insert(id);
-            }
-
-            world.get_or_create_archetype_from_set(new_types, new_types_names)
+            create_addition_archetype::<T>(world, old_arch_id, incoming_ids)
         };
 
         if old_arch_id == new_arch_id {
@@ -247,109 +204,55 @@ impl<T: ComponentTuple> WorldCommand for AddComponentsCommand<T> {
         }
 
         unsafe {
-            let map_ptr = &mut world.archetypes_manager.archetypes
-                as *mut std::collections::HashMap<ArchetypeId, Archetype>;
-            let old_arch = (*map_ptr)
-                .get_mut(&old_arch_id)
-                .expect("Old archetype missing");
-            let new_arch = (*map_ptr)
-                .get_mut(&new_arch_id)
-                .expect("New archetype missing");
-
-            let old_cols = &mut *old_arch.columns.get();
-            let new_cols = &mut *new_arch.columns.get();
-
-            if new_cols.is_empty() {
-                T::create_empty_columns(new_cols);
-                for (type_id, old_col) in old_cols.iter() {
-                    if !new_cols.contains_key(type_id) {
-                        new_cols.insert(
-                            *type_id,
-                            ComponentColumn {
-                                data: old_col.data.clone_empty(),
-                            },
-                        );
-                    }
+            let (old_arch, new_arch) = get_double_archetypes(world, old_arch_id, new_arch_id);
+            {
+                let new_cols = &mut *new_arch.columns.get();
+                let old_cols = &mut *old_arch.columns.get();
+                if new_cols.is_empty() {
+                    T::create_empty_columns(new_cols);
+                    clone_existing_columns(old_cols, new_cols);
+                    initialize_missing_archetype_markers(&new_arch.types, new_cols);
                 }
+                move_matching_columns(old_cols, new_cols, old_idx as usize);
             }
             let new_dense_idx = new_arch.entities.len() as u32;
-            for (type_id, old_col) in old_cols.iter_mut() {
-                if let Some(new_col) = new_cols.get_mut(type_id) {
-                    let dst_ptr = &mut *new_col.data as *mut dyn AnyColumn;
-                    old_col.data.move_row_erased(old_idx as usize, dst_ptr);
-                }
-            }
-            let columns = &mut *new_arch.columns.get();
-            let tracked = TRACKED_COMPONENTS.read().unwrap();
-
             self.components.push_to_archetype(new_arch);
-            for meta in tracked.iter() {
-                if incoming_ids.contains(&meta.marker_id) {
-                    if let Some(marker_column) = columns.get_mut(&meta.marker_id) {
-                        (meta.push_default_marker)(marker_column);
-                    }
-                }
-            }
-            let last_idx = (old_arch.entities.len() - 1) as u32;
-            if old_idx != last_idx {
-                let swapped_entity_registry_idx =
-                    old_arch.entities[last_idx as usize].registry_index as usize;
-                let vec = &mut (*registry_ptr).0;
-                let swapped_cell = &mut vec[swapped_entity_registry_idx];
-                swapped_cell.idx = old_idx;
-            }
+            let fresh_old_cols = &mut *old_arch.columns.get();
+            let fresh_new_cols = &mut *new_arch.columns.get();
 
+            migrate_addition_markers(
+                &old_arch.types,
+                old_idx as usize,
+                incoming_ids,
+                fresh_old_cols,
+                fresh_new_cols,
+            );
+            swap_remove_entity_registry_update(old_arch, old_idx);
             let entity_handle = old_arch.entities.swap_remove(old_idx as usize);
             new_arch.entities.push(entity_handle);
-
-            let vec = &mut (*registry_ptr).0;
-            let target_cell = &mut vec[target_registry_idx];
-            target_cell.archetype_id = new_arch_id;
-            target_cell.idx = new_dense_idx;
+            update_registry_cell(target_registry_idx, new_arch_id, new_dense_idx);
         }
     }
 }
 
 pub(crate) struct RemoveComponentsCommand<T: ComponentTuple> {
-    pub(crate) entity: crate::entity::Entity,
+    pub(crate) entity: Entity,
     pub(crate) _marker: std::marker::PhantomData<T>,
 }
 
 impl<T: ComponentTuple> WorldCommand for RemoveComponentsCommand<T> {
     fn apply(self, world: &mut World) {
         let target_registry_idx = self.entity.registry_index as usize;
-        let registry_ptr = std::ptr::addr_of_mut!(REGISTRY);
-
-        let (old_arch_id, old_idx) = unsafe {
-            let vec = &mut (*registry_ptr).0;
-            let cell = &vec[target_registry_idx];
-            (cell.archetype_id, cell.idx)
-        };
-
+        let (old_arch_id, old_idx) = get_registry_location(target_registry_idx);
         let removed_ids = T::get_type_ids();
 
         let new_arch_id = if let Some(id) = world
             .archetypes_manager
-            .find_id_by_subtracting(old_arch_id, removed_ids)
+            .find_target_id_for_subtraction(old_arch_id, removed_ids)
         {
             id
         } else {
-            let old_arch = world
-                .archetypes_manager
-                .archetypes
-                .get(&old_arch_id)
-                .unwrap();
-            let mut new_types = old_arch.types.clone();
-            for id in removed_ids {
-                new_types.remove(id);
-            }
-
-            let mut new_types_names = old_arch.type_names.clone();
-            for id_name in T::get_type_names().as_ref() {
-                new_types_names.remove(*id_name);
-            }
-
-            world.get_or_create_archetype_from_set(new_types, new_types_names)
+            create_subtraction_archetype::<T>(world, old_arch_id, removed_ids)
         };
 
         if old_arch_id == new_arch_id {
@@ -357,146 +260,326 @@ impl<T: ComponentTuple> WorldCommand for RemoveComponentsCommand<T> {
         }
 
         unsafe {
-            let map_ptr = &mut world.archetypes_manager.archetypes
-                as *mut std::collections::HashMap<ArchetypeId, Archetype>;
-
-            let old_arch = (*map_ptr)
-                .get_mut(&old_arch_id)
-                .expect("Old archetype missing");
-            let new_arch = (*map_ptr)
-                .get_mut(&new_arch_id)
-                .expect("New archetype missing");
-
+            let (old_arch, new_arch) = get_double_archetypes(world, old_arch_id, new_arch_id);
             let old_cols = &mut *old_arch.columns.get();
             let new_cols = &mut *new_arch.columns.get();
-
             if new_cols.is_empty() {
-                for (type_id, old_col) in old_cols.iter() {
-                    if !removed_ids.contains(type_id) {
-                        new_cols.insert(
-                            *type_id,
-                            ComponentColumn {
-                                data: old_col.data.clone_empty(),
-                            },
-                        );
-                    }
-                }
+                populate_subtracted_columns(&new_arch.types, old_cols, new_cols);
             }
-
             let new_dense_idx = new_arch.entities.len() as u32;
-            for (type_id, new_col) in new_cols.iter_mut() {
-                if let Some(old_col) = old_cols.get_mut(type_id) {
-                    let dst_ptr = &mut *new_col.data as *mut dyn AnyColumn;
-                    old_col.data.move_row_erased(old_idx as usize, dst_ptr);
-                }
-            }
-
-            let tracked = TRACKED_COMPONENTS.read().unwrap();
-
-            for id in removed_ids {
-                if let Some(old_col) = old_cols.get_mut(id) {
-                    old_col.data.swap_remove_erased(old_idx as usize);
-                }
-                if let Some(meta) = tracked.iter().find(|m| m.marker_id == *id) {
-                    if let Some(marker_col) = old_cols.get_mut(&meta.marker_id) {
-                        marker_col.data.swap_remove_erased(old_idx as usize);
-                    }
-                }
-            }
-            let last_idx = (old_arch.entities.len() - 1) as u32;
-            if old_idx != last_idx {
-                let swapped_entity_registry_idx =
-                    old_arch.entities[last_idx as usize].registry_index as usize;
-                let vec = &mut (*registry_ptr).0;
-                let swapped_cell = &mut vec[swapped_entity_registry_idx];
-                swapped_cell.idx = old_idx;
-            }
+            move_matching_columns(old_cols, new_cols, old_idx as usize);
+            erase_subtracted_columns(removed_ids, old_cols, old_idx as usize);
+            erase_subtracted_markers(&old_arch.types, &new_arch.types, old_cols, old_idx as usize);
+            swap_remove_entity_registry_update(old_arch, old_idx);
 
             let entity_handle = old_arch.entities.swap_remove(old_idx as usize);
             new_arch.entities.push(entity_handle);
 
+            update_registry_cell(target_registry_idx, new_arch_id, new_dense_idx);
+        }
+    }
+}
+
+#[inline(always)]
+fn get_registry_location(registry_idx: usize) -> (ArchetypeId, u32) {
+    unsafe {
+        let vec = &(*std::ptr::addr_of!(REGISTRY)).0;
+        let cell = &vec[registry_idx];
+        (cell.archetype_id, cell.idx)
+    }
+}
+
+#[inline(always)]
+fn update_registry_cell(registry_idx: usize, archetype_id: ArchetypeId, dense_idx: u32) {
+    unsafe {
+        let vec = &mut (*std::ptr::addr_of_mut!(REGISTRY)).0;
+        let cell = &mut vec[registry_idx];
+        cell.archetype_id = archetype_id;
+        cell.idx = dense_idx;
+    }
+}
+
+fn alloc_registry_cell(archetype_id: ArchetypeId, dense_idx: u32, world: &mut World) -> u32 {
+    let registry_ptr = std::ptr::addr_of_mut!(REGISTRY);
+    if let Some(recycled_idx) = world.free_indices_list.pop() {
+        unsafe {
             let vec = &mut (*registry_ptr).0;
-            let target_cell_mut = &mut vec[target_registry_idx];
-            target_cell_mut.archetype_id = new_arch_id;
-            target_cell_mut.idx = new_dense_idx;
+            vec[recycled_idx as usize] = RegistryCell {
+                archetype_id,
+                idx: dense_idx,
+                handle_count: std::sync::atomic::AtomicU32::new(0),
+            };
+        }
+        recycled_idx
+    } else {
+        unsafe {
+            let vec = &mut (*registry_ptr).0;
+            let len = vec.len() as u32;
+            vec.push(RegistryCell {
+                archetype_id,
+                idx: dense_idx,
+                handle_count: std::sync::atomic::AtomicU32::new(0),
+            });
+            len
+        }
+    }
+}
+
+#[inline(always)]
+unsafe fn get_double_archetypes(
+    world: &mut World,
+    old_id: ArchetypeId,
+    new_id: ArchetypeId,
+) -> (&mut Archetype, &mut Archetype) {
+    let map_ptr =
+        &mut world.archetypes_manager.archetypes as *mut FxHashMap<ArchetypeId, Archetype>;
+    let old_arch = unsafe { (*map_ptr).get_mut(&old_id).expect("Old archetype missing") };
+    let new_arch = unsafe { (*map_ptr).get_mut(&new_id).expect("New archetype missing") };
+    (old_arch, new_arch)
+}
+
+fn create_addition_archetype<T: ComponentTuple>(
+    world: &mut World,
+    old_arch_id: ArchetypeId,
+    incoming_ids: &[TypeId],
+) -> ArchetypeId {
+    let old_arch = world
+        .archetypes_manager
+        .archetypes
+        .get(&old_arch_id)
+        .unwrap();
+    let mut new_types = old_arch.types.clone();
+    for id in incoming_ids {
+        new_types.insert(*id);
+    }
+    world
+        .archetypes_manager
+        .sync_tracking_markers(&mut new_types);
+
+    let mut new_types_names = old_arch.type_names.clone();
+    for id in T::get_type_names().as_ref() {
+        new_types_names.insert(id);
+    }
+    world
+        .archetypes_manager
+        .get_or_create_from_set(new_types, new_types_names)
+}
+
+fn create_subtraction_archetype<T: ComponentTuple>(
+    world: &mut World,
+    old_arch_id: ArchetypeId,
+    removed_ids: &[TypeId],
+) -> ArchetypeId {
+    let old_arch = world
+        .archetypes_manager
+        .archetypes
+        .get(&old_arch_id)
+        .unwrap();
+    let mut new_types = old_arch.types.clone();
+    for id in removed_ids {
+        new_types.remove(id);
+    }
+    world
+        .archetypes_manager
+        .sync_tracking_markers(&mut new_types);
+
+    let mut new_types_names = old_arch.type_names.clone();
+    for id_name in T::get_type_names().as_ref() {
+        new_types_names.shift_remove(id_name);
+    }
+    world
+        .archetypes_manager
+        .get_or_create_from_set(new_types, new_types_names)
+}
+
+#[inline(always)]
+fn clone_existing_columns(
+    src: &IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
+    dst: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
+) {
+    for (type_id, old_col) in src.iter() {
+        if !dst.contains_key(type_id) {
+            dst.insert(
+                *type_id,
+                ComponentColumn {
+                    data: old_col.data.clone_empty(),
+                },
+            );
+        }
+    }
+}
+
+#[inline(always)]
+fn populate_subtracted_columns(
+    allowed_types: &FxHashSet<TypeId>,
+    src: &IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
+    dst: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
+) {
+    for (type_id, old_col) in src.iter() {
+        if allowed_types.contains(type_id) {
+            dst.insert(
+                *type_id,
+                ComponentColumn {
+                    data: old_col.data.clone_empty(),
+                },
+            );
+        }
+    }
+}
+
+#[inline(always)]
+unsafe fn move_matching_columns(
+    src: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
+    dst: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
+    row_idx: usize,
+) {
+    for (type_id, old_col) in src.iter_mut() {
+        if let Some(new_col) = dst.get_mut(type_id) {
+            let dst_ptr = &mut *new_col.data as *mut dyn AnyColumn;
+            unsafe { old_col.data.move_row_erased(row_idx, dst_ptr) };
+        }
+    }
+}
+
+#[inline(always)]
+unsafe fn erase_subtracted_columns(
+    ids: &[TypeId],
+    columns: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
+    row_idx: usize,
+) {
+    for id in ids {
+        if let Some(col) = columns.get_mut(id) {
+            unsafe { col.data.swap_remove_erased(row_idx) };
+        }
+    }
+}
+
+#[inline(always)]
+unsafe fn swap_remove_entity_registry_update(arch: &mut Archetype, removed_row_idx: u32) {
+    let last_idx = (arch.entities.len() - 1) as u32;
+    if removed_row_idx != last_idx {
+        let swapped_entity_registry_idx = arch.entities[last_idx as usize].registry_index as usize;
+        let vec = unsafe { &mut (*std::ptr::addr_of_mut!(REGISTRY)).0 };
+        let swapped_cell = &mut vec[swapped_entity_registry_idx];
+        swapped_cell.idx = removed_row_idx;
+    }
+}
+
+#[inline(always)]
+fn initialize_spawn_markers(columns: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>) {
+    let tracked = TRACKED_COMPONENTS.read().unwrap();
+    for meta in tracked.iter() {
+        if let Some(marker_column) = columns.get_mut(&meta.marker_id) {
+            unsafe { (meta.push_default_marker)(marker_column) };
+        }
+    }
+}
+
+#[inline(always)]
+fn initialize_missing_archetype_markers(
+    types: &FxHashSet<TypeId>,
+    columns: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
+) {
+    let tracked = TRACKED_COMPONENTS.read().unwrap();
+    for meta in tracked.iter() {
+        if types.contains(&meta.marker_id) && !columns.contains_key(&meta.marker_id) {
+            columns.insert(meta.marker_id, (meta.create_marker_column)());
+        }
+    }
+}
+
+#[inline(always)]
+unsafe fn migrate_addition_markers(
+    old_types: &FxHashSet<TypeId>,
+    row_idx: usize,
+    incoming_ids: &[TypeId],
+    old_cols: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
+    new_cols: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
+) {
+    let tracked = TRACKED_COMPONENTS.read().unwrap();
+    for meta in tracked.iter() {
+        if new_cols.contains_key(&meta.marker_id) {
+            if old_types.contains(&meta.marker_id) && old_cols.contains_key(&meta.marker_id) {
+                if let Some(old_marker_col) = old_cols.get_mut(&meta.marker_id) {
+                    if let Some(new_marker_col) = new_cols.get_mut(&meta.marker_id) {
+                        let dst_ptr = &mut *new_marker_col.data as *mut dyn AnyColumn;
+                        unsafe { old_marker_col.data.move_row_erased(row_idx, dst_ptr) };
+                    }
+                }
+            } else if incoming_ids.contains(&meta.component_id) {
+                if let Some(marker_column) = new_cols.get_mut(&meta.marker_id) {
+                    unsafe { (meta.push_default_marker)(marker_column) };
+                }
+            }
+        }
+    }
+}
+
+#[inline(always)]
+unsafe fn erase_subtracted_markers(
+    old_types: &FxHashSet<TypeId>,
+    new_types: &FxHashSet<TypeId>,
+    old_cols: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
+    row_idx: usize,
+) {
+    let tracked = TRACKED_COMPONENTS.read().unwrap();
+    for meta in tracked.iter() {
+        if old_types.contains(&meta.marker_id) && !new_types.contains(&meta.marker_id) {
+            if let Some(marker_col) = old_cols.get_mut(&meta.marker_id) {
+                unsafe { marker_col.data.swap_remove_erased(row_idx) };
+            }
         }
     }
 }
 
 pub(crate) struct CommandsBufferData {
     pub(crate) queue: CommandQueue,
-    pub(crate) despawns: HashSet<DespawnCommand>,
+    pub(crate) despawns: FxHashSet<DespawnCommand>,
 }
 
 impl CommandsBufferData {
     pub(crate) fn new() -> Self {
         Self {
             queue: CommandQueue::new(),
-            despawns: HashSet::new(),
+            despawns: FxHashSet::default(),
         }
     }
 }
-
+pub(crate) struct LocalSlot {
+    pub(crate) is_busy: AtomicBool,
+    pub(crate) data: UnsafeCell<CommandsBufferData>,
+}
 pub(crate) struct CommandBuffer {
-    pub(crate) data: CommandsBufferData,
-    pub(crate) local_data: ThreadLocal<RefCell<CommandsBufferData>>,
-    pub(crate) merge_lock: Mutex<()>,
+    pub(crate) data: RwLock<CommandsBufferData>,
+    pub(crate) local_data: ThreadLocal<LocalSlot>,
 }
 
 impl CommandBuffer {
     pub fn new() -> Self {
         Self {
-            data: CommandsBufferData::new(),
+            data: RwLock::new(CommandsBufferData::new()),
             local_data: ThreadLocal::new(),
-            merge_lock: Mutex::new(()),
         }
     }
+}
+
+pub(crate) enum CommandsOrigin {
+    ThreadLocal(&'static AtomicBool),
+    HeapFallback(*mut CommandsBufferData),
 }
 
 pub struct Commands<'a> {
-    pub(crate) local_data: RefMut<'a, CommandsBufferData>,
-    pub(crate) master_buffer_ptr: *mut CommandBuffer,
-}
-
-impl<'a> SystemParam for Commands<'a> {
-    fn get_access() -> ParamAccess {
-        ParamAccess::default()
-    }
-
-    fn extract(world: &mut World, _data: &mut FunctionData) -> Self {
-        unsafe {
-            let master_buffer_ptr = std::ptr::addr_of_mut!(world.commands);
-
-            let master_ref = &mut *master_buffer_ptr;
-
-            let data_cell = master_ref
-                .local_data
-                .get_or(|| RefCell::new(CommandsBufferData::new()));
-            match data_cell.try_borrow_mut() {
-                Ok(data_borrow) => Self {
-                    local_data: data_borrow,
-                    master_buffer_ptr: master_buffer_ptr,
-                },
-                _ => {
-                    let fallback_data = CommandsBufferData::new();
-                    let fallback_data_cell = RefCell::new(fallback_data);
-                    let local_borrow = fallback_data_cell.borrow_mut();
-                    let static_borrow: RefMut<'a, CommandsBufferData> =
-                        std::mem::transmute(local_borrow);
-
-                    Self {
-                        local_data: static_borrow,
-                        master_buffer_ptr: master_buffer_ptr,
-                    }
-                }
-            }
-        }
-    }
+    pub(crate) local_data: *mut CommandsBufferData,
+    pub(crate) origin: CommandsOrigin,
+    pub(crate) master_buffer: *mut CommandBuffer,
+    pub(crate) _marker: std::marker::PhantomData<&'a mut CommandsBufferData>,
 }
 
 impl Commands<'_> {
     fn push<C: WorldCommand + 'static>(&mut self, command: C) {
-        self.local_data.queue.push(command);
+        unsafe {
+            (*self.local_data).queue.push(command);
+        }
     }
 
     pub fn spawn<T: ComponentTuple>(&mut self, components: T) {
@@ -504,7 +587,11 @@ impl Commands<'_> {
     }
 
     pub fn despawn(&mut self, entity: Entity) {
-        self.local_data.despawns.insert(DespawnCommand { entity });
+        unsafe {
+            (*self.local_data)
+                .despawns
+                .insert(DespawnCommand { entity });
+        }
     }
 
     pub fn add_components<C: ComponentTuple>(&mut self, entity: Entity, components: C) {
@@ -519,34 +606,72 @@ impl Commands<'_> {
     }
 
     pub fn despawn_iter(&self) -> std::collections::hash_set::Iter<'_, DespawnCommand> {
-        self.local_data.despawns.iter()
+        unsafe { (*self.local_data).despawns.iter() }
+    }
+}
+
+impl<'a> SystemParam for Commands<'a> {
+    fn get_access() -> ParamAccess {
+        ParamAccess::default()
+    }
+
+    fn extract(world: &mut World, _data: &mut FunctionData) -> Self {
+        unsafe {
+            let master_buffer_ptr = Arc::as_ptr(&world.commands) as *mut CommandBuffer;
+            let master_ref: &'a CommandBuffer = &*master_buffer_ptr;
+            let slot = master_ref.local_data.get_or(|| LocalSlot {
+                is_busy: AtomicBool::new(false),
+                data: UnsafeCell::new(CommandsBufferData::new()),
+            });
+            if slot
+                .is_busy
+                .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+            {
+                Self {
+                    local_data: slot.data.get(),
+                    origin: CommandsOrigin::ThreadLocal(std::mem::transmute(&slot.is_busy)),
+                    master_buffer: master_buffer_ptr,
+                    _marker: std::marker::PhantomData,
+                }
+            } else {
+                let heap_box = Box::new(CommandsBufferData::new());
+                let heap_ptr = Box::into_raw(heap_box);
+
+                Self {
+                    local_data: heap_ptr,
+                    origin: CommandsOrigin::HeapFallback(heap_ptr),
+                    master_buffer: master_buffer_ptr,
+                    _marker: std::marker::PhantomData,
+                }
+            }
+        }
     }
 }
 
 impl<'a> Drop for Commands<'a> {
     fn drop(&mut self) {
-        if self.local_data.queue.is_empty() && self.local_data.despawns.is_empty() {
-            return;
-        }
         unsafe {
-            let master_buffer_ptr = self.master_buffer_ptr;
-            let _guard = (*master_buffer_ptr).merge_lock.lock().unwrap();
+            let data_ref = &mut *self.local_data;
+            if !data_ref.queue.is_empty() || !data_ref.despawns.is_empty() {
+                let mut master_data = (*self.master_buffer).data.write().unwrap();
 
-            if !self.local_data.queue.is_empty() {
-                let queue_offset = std::mem::offset_of!(CommandBuffer, data.queue);
-                let queue_ptr =
-                    (master_buffer_ptr as *mut u8).add(queue_offset) as *mut CommandQueue;
+                if !data_ref.queue.is_empty() {
+                    master_data.queue.merge(&mut data_ref.queue);
+                    data_ref.queue.clear_bytes();
+                }
 
-                (*queue_ptr).merge(&mut self.local_data.queue);
-                self.local_data.queue.clear_bytes();
+                if !data_ref.despawns.is_empty() {
+                    master_data.despawns.extend(data_ref.despawns.drain());
+                }
             }
-
-            if !self.local_data.despawns.is_empty() {
-                let despawns_offset = std::mem::offset_of!(CommandBuffer, data.despawns);
-                let despawns_ptr = (master_buffer_ptr as *mut u8).add(despawns_offset)
-                    as *mut HashSet<DespawnCommand>;
-
-                (*despawns_ptr).extend(self.local_data.despawns.drain());
+            match self.origin {
+                CommandsOrigin::ThreadLocal(is_busy_flag) => {
+                    is_busy_flag.store(false, Ordering::Relaxed);
+                }
+                CommandsOrigin::HeapFallback(heap_ptr) => {
+                    let _cleanup = Box::from_raw(heap_ptr);
+                }
             }
         }
     }

@@ -2,6 +2,7 @@ use std::thread;
 
 use rusty_fork::rusty_fork_test;
 use venix::prelude::*;
+
 pub struct Position {
     pub x: f32,
     pub y: f32,

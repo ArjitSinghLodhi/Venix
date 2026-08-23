@@ -1,6 +1,7 @@
-use std::collections::HashSet;
 use std::fmt::Display;
 use std::marker::PhantomData;
+
+use fxhash::FxHashSet;
 
 use crate::query::filter::Filter;
 use crate::query::params::WorldQuery;
@@ -82,7 +83,7 @@ impl<T: 'static + Send + Sync> WorldQuery for ChangedTracker<T> {
     type ReadOnlyItem<'w> = ChangedTracker<T>;
     type Fetch = (u8, u8, u8, *const ChangedMarker<T>);
 
-    fn matches(types: &HashSet<TypeId>) -> bool {
+    fn matches(types: &FxHashSet<TypeId>) -> bool {
         types.contains(&TypeId::of::<T>())
     }
 
