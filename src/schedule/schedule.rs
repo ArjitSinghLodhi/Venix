@@ -25,6 +25,7 @@ impl PartialEq for ScheduleId {
 
 impl<T: ScheduleLabel> IntoScheduleId<T> for T {}
 
+#[derive(Clone, Copy)]
 pub enum SchedulePlace {
     Before(ScheduleId),
     After(ScheduleId),

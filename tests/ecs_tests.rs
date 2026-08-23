@@ -63,16 +63,16 @@ fn verify_resource_and_commands(
     assert_eq!(tracker.points, 100);
 
     let mut found = false;
-    for chunk in query.iter() {
-        for pos in chunk.iter() {
+    for view in query.iter() {
+        for pos in view.iter() {
             if pos.x == 10.0 && pos.y == 20.0 {
                 found = true;
             }
         }
     }
     let mut found_b = 0;
-    for chunk in query_b.iter() {
-        for pos in chunk.iter() {
+    for view in query_b.iter() {
+        for pos in view.iter() {
             if pos.x == 1.0 && pos.y == 1.0 {
                 found_b += 1;
             }
@@ -136,14 +136,14 @@ fn verify_logical_queries(
     not_query: Query<&Position, (With<TagA>, Not<With<TagB>>)>,
 ) {
     let mut or_count = 0;
-    for chunk in or_query.iter() {
-        or_count += chunk.len();
+    for view in or_query.iter() {
+        or_count += view.len();
     }
     assert_eq!(or_count, 3);
 
     let mut not_count = 0;
-    for chunk in not_query.iter() {
-        for pos in chunk.iter() {
+    for view in not_query.iter() {
+        for pos in view.iter() {
             if pos.x == 2.0 {
                 not_count += 1;
             }
@@ -170,8 +170,8 @@ fn spawn_tracking_entity(mut commands: Commands) {
 }
 
 fn modify_component_system(mut query: Query<&mut Position>) {
-    for mut chunk in query.iter_mut() {
-        for mut pos in chunk.iter_mut() {
+    for mut view in query.iter_mut() {
+        for mut pos in view.iter_mut() {
             pos.x = 50.0;
         }
     }
@@ -179,8 +179,8 @@ fn modify_component_system(mut query: Query<&mut Position>) {
 
 fn verify_change_tracking(query: Query<&Position, Changed<Position>>) {
     let mut change_detected = false;
-    for chunk in query.iter() {
-        for pos in chunk.iter() {
+    for view in query.iter() {
+        for pos in view.iter() {
             if pos.x == 50.0 {
                 change_detected = true;
             }
@@ -191,8 +191,8 @@ fn verify_change_tracking(query: Query<&Position, Changed<Position>>) {
 
 fn verify_change_tracking_data(query: Query<(&Position, ChangedTracker<Velocity>)>) {
     let mut change_detected_track = false;
-    for chunk in query.iter() {
-        for (pos, mark) in chunk.iter() {
+    for view in query.iter() {
+        for (pos, mark) in view.iter() {
             if pos.x == 50.0 && !mark.is_changed() {
                 change_detected_track = true;
             }
@@ -228,8 +228,8 @@ fn setup_multi_frame_entity(mut commands: Commands) {
 fn increment_frame_system(mut counter: ResMut<FrameCounter>, mut query: Query<&mut Position>) {
     counter.current_frame += 1;
     if counter.current_frame == 2 {
-        for mut chunk in query.iter_mut() {
-            for mut pos in chunk.iter_mut() {
+        for mut view in query.iter_mut() {
+            for mut pos in view.iter_mut() {
                 pos.x = 20.0;
             }
         }
@@ -242,16 +242,16 @@ fn verify_multi_frame_tracking(
 ) {
     if counter.current_frame == 1 {
         let mut changes = 0;
-        for chunk in changed_query.iter() {
-            changes += chunk.len();
+        for view in changed_query.iter() {
+            changes += view.len();
         }
         assert_eq!(changes, 0);
     }
 
     if counter.current_frame == 2 {
         let mut change_detected = false;
-        for chunk in changed_query.iter() {
-            for pos in chunk.iter() {
+        for view in changed_query.iter() {
+            for pos in view.iter() {
                 if pos.x == 20.0 {
                     change_detected = true;
                 }
@@ -265,8 +265,8 @@ fn verify_multi_frame_tracking(
 
     if counter.current_frame == 3 {
         let mut changes_on_frame_three = 0;
-        for chunk in changed_query.iter() {
-            changes_on_frame_three += chunk.len();
+        for view in changed_query.iter() {
+            changes_on_frame_three += view.len();
         }
         assert_eq!(
             changes_on_frame_three, 0,

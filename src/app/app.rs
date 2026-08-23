@@ -82,6 +82,12 @@ struct SystemsBlock {
     systems: Vec<Box<dyn System>>,
 }
 
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct App {
     pub(crate) world: World,
     schedules: Vec<Schedule>,
@@ -98,8 +104,7 @@ impl App {
                 "❌ VENIX ARCHITECTURE VIOLATION: Multiple App instances detected!\nEnsure you only instantiate exactly one App::new() across your entire binary runtime."
             );
         }
-        let mut schedules = Vec::new();
-        schedules.push(Schedule::new(Startup));
+        let schedules = vec![Schedule::new(Startup)];
         let function = |app: &mut App| {
             app.build();
             app.run_startup();
@@ -109,7 +114,7 @@ impl App {
         };
         Self {
             world: World::new(),
-            schedules: schedules,
+            schedules,
             plugins: Vec::new(),
             total_systems_blocks: Vec::new(),
             runner_fn: function,
@@ -142,20 +147,6 @@ impl App {
         self.configuration.not_ready();
         self.plugins.push(Box::new(plugins));
         self
-    }
-
-    pub fn run_schedule(&mut self, schedule_id: ScheduleId) {
-        self.configuration.built();
-        self.configuration.ran_startup();
-        if schedule_id == Startup::id() {
-            panic!("Please use run_startup() instead");
-        }
-        let schedule = self
-            .schedules
-            .iter_mut()
-            .find(|s| s.schedule.id_from_self() == schedule_id)
-            .expect("Schedule Not Registered when Running manual schedule through ScheduleId");
-        schedule.run(&mut self.world);
     }
 
     pub fn build(&mut self) {
@@ -361,10 +352,10 @@ impl App {
 
         if let Some(neighbors) = adjacency_list.get(&startup_id) {
             for &v in neighbors {
-                if let Some(deg) = in_degree.get_mut(&v) {
-                    if *deg > 0 {
-                        *deg -= 1;
-                    }
+                if let Some(deg) = in_degree.get_mut(&v)
+                    && *deg > 0
+                {
+                    *deg -= 1;
                 }
             }
         }

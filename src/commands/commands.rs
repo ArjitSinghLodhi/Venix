@@ -23,7 +23,7 @@ use crate::{
     },
 };
 
-pub trait ComponentTuple: Send + Sync + 'static {
+pub trait ComponentTuple: 'static {
     const TYPE_IDS: &[TypeId];
     fn get_type_ids() -> &'static [TypeId];
     fn push_to_archetype(self, archetype: &mut Archetype);
@@ -35,7 +35,7 @@ pub trait ComponentTuple: Send + Sync + 'static {
 
 macro_rules! impl_component_tuple {
     ($($T:ident),*) => {
-        impl<$($T: 'static + Send + Sync),*> ComponentTuple for ($($T,)*) {
+        impl<$($T: 'static),*> ComponentTuple for ($($T,)*) {
 
             const TYPE_IDS: &[TypeId] = &[ $( TypeId::of::<$T>() ),* ];
 
@@ -125,9 +125,13 @@ impl DespawnCommand {
     pub fn apply(self, world: &mut World) {
         let target_registry_idx = self.entity.registry_index as usize;
         let (arch_id, target_idx) = unsafe {
-            let cell_ptr = REGISTRY.get_ptr(target_registry_idx as usize);
-            let cell_arch_id = (*cell_ptr).archetype_id;    
-            if (*cell_ptr).handle_count.load(std::sync::atomic::Ordering::Relaxed) > 0 {
+            let cell_ptr = REGISTRY.get_ptr(target_registry_idx);
+            let cell_arch_id = (*cell_ptr).archetype_id;
+            if (*cell_ptr)
+                .handle_count
+                .load(std::sync::atomic::Ordering::Relaxed)
+                > 0
+            {
                 let types_names = &&world
                     .archetypes_manager
                     .archetypes
@@ -154,8 +158,8 @@ impl DespawnCommand {
                 arch.entities[last_idx as usize].registry_index as usize;
 
             unsafe {
-                let swapped_cell_ptr = REGISTRY.get_mut_ptr(swapped_entity_registry_idx as usize);
-                (*swapped_cell_ptr).idx = target_idx; 
+                let swapped_cell_ptr = REGISTRY.get_mut_ptr(swapped_entity_registry_idx);
+                (*swapped_cell_ptr).idx = target_idx;
             }
         }
         world.free_indices_list.push(target_registry_idx as u32);
@@ -279,7 +283,7 @@ impl<T: ComponentTuple> WorldCommand for RemoveComponentsCommand<T> {
 #[inline(always)]
 fn get_registry_location(registry_idx: usize) -> (ArchetypeId, u32) {
     unsafe {
-        let cell_ptr = REGISTRY.get_ptr(registry_idx as usize);
+        let cell_ptr = REGISTRY.get_ptr(registry_idx);
         let arch_id = (*cell_ptr).archetype_id;
         (arch_id, (*cell_ptr).idx)
     }
@@ -288,7 +292,7 @@ fn get_registry_location(registry_idx: usize) -> (ArchetypeId, u32) {
 #[inline(always)]
 fn update_registry_cell(registry_idx: usize, archetype_id: ArchetypeId, dense_idx: u32) {
     unsafe {
-        let cell_ptr = REGISTRY.get_mut_ptr(registry_idx as usize);
+        let cell_ptr = REGISTRY.get_mut_ptr(registry_idx);
         (*cell_ptr).archetype_id = archetype_id;
         (*cell_ptr).idx = dense_idx;
     }
@@ -452,7 +456,9 @@ unsafe fn swap_remove_entity_registry_update(arch: &mut Archetype, removed_row_i
     if removed_row_idx != last_idx {
         let swapped_entity_registry_idx = arch.entities[last_idx as usize].registry_index as usize;
         let swapped_cell = unsafe { REGISTRY.get_mut_ptr(swapped_entity_registry_idx) };
-        unsafe {(*swapped_cell).idx = removed_row_idx;}
+        unsafe {
+            (*swapped_cell).idx = removed_row_idx;
+        }
     }
 }
 
@@ -491,16 +497,16 @@ unsafe fn migrate_addition_markers(
     for meta in tracked.iter() {
         if new_cols.contains_key(&meta.marker_id) {
             if old_types.contains(&meta.marker_id) && old_cols.contains_key(&meta.marker_id) {
-                if let Some(old_marker_col) = old_cols.get_mut(&meta.marker_id) {
-                    if let Some(new_marker_col) = new_cols.get_mut(&meta.marker_id) {
-                        let dst_ptr = &mut *new_marker_col.data as *mut dyn AnyColumn;
-                        unsafe { old_marker_col.data.move_row_erased(row_idx, dst_ptr) };
-                    }
+                if let Some(old_marker_col) = old_cols.get_mut(&meta.marker_id)
+                    && let Some(new_marker_col) = new_cols.get_mut(&meta.marker_id)
+                {
+                    let dst_ptr = &mut *new_marker_col.data as *mut dyn AnyColumn;
+                    unsafe { old_marker_col.data.move_row_erased(row_idx, dst_ptr) };
                 }
-            } else if incoming_ids.contains(&meta.component_id) {
-                if let Some(marker_column) = new_cols.get_mut(&meta.marker_id) {
-                    unsafe { (meta.push_default_marker)(marker_column) };
-                }
+            } else if incoming_ids.contains(&meta.component_id)
+                && let Some(marker_column) = new_cols.get_mut(&meta.marker_id)
+            {
+                unsafe { (meta.push_default_marker)(marker_column) };
             }
         }
     }
@@ -515,10 +521,11 @@ unsafe fn erase_subtracted_markers(
 ) {
     let tracked = TRACKED_COMPONENTS.read().unwrap();
     for meta in tracked.iter() {
-        if old_types.contains(&meta.marker_id) && !new_types.contains(&meta.marker_id) {
-            if let Some(marker_col) = old_cols.get_mut(&meta.marker_id) {
-                unsafe { marker_col.data.swap_remove_erased(row_idx) };
-            }
+        if old_types.contains(&meta.marker_id)
+            && !new_types.contains(&meta.marker_id)
+            && let Some(marker_col) = old_cols.get_mut(&meta.marker_id)
+        {
+            unsafe { marker_col.data.swap_remove_erased(row_idx) };
         }
     }
 }
@@ -594,6 +601,10 @@ impl Commands<'_> {
             entity,
             _marker: std::marker::PhantomData,
         });
+    }
+
+    pub unsafe fn push_raw<T: WorldCommand>(&mut self, cmd: T) {
+        self.push(cmd);
     }
 
     pub fn despawn_iter(&self) -> std::collections::hash_set::Iter<'_, DespawnCommand> {

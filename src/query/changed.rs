@@ -22,7 +22,7 @@ pub(crate) struct TrackedComponentMeta {
 
 pub(crate) static TRACKED_COMPONENTS: RwLock<Vec<TrackedComponentMeta>> = RwLock::new(Vec::new());
 
-pub(crate) fn register_tracked_component<T: 'static + Send + Sync>() {
+pub(crate) fn register_tracked_component<T: 'static>() {
     let mut tracked = TRACKED_COMPONENTS.write().unwrap();
 
     let component_id = TypeId::of::<T>();
@@ -78,7 +78,7 @@ impl<T> ChangedTracker<T> {
     }
 }
 
-impl<T: 'static + Send + Sync> WorldQuery for ChangedTracker<T> {
+impl<T: 'static> WorldQuery for ChangedTracker<T> {
     type Item<'w> = ChangedTracker<T>;
     type ReadOnlyItem<'w> = ChangedTracker<T>;
     type Fetch = (u8, u8, u8, *const ChangedMarker<T>);
@@ -126,7 +126,7 @@ impl<T: 'static + Send + Sync> WorldQuery for ChangedTracker<T> {
 
 pub struct Changed<T>(std::marker::PhantomData<T>);
 
-impl<T: 'static + Send + Sync> Filter for Changed<T> {
+impl<T: 'static> Filter for Changed<T> {
     fn matches(types: &AccessHashSet<TypeId>) -> bool {
         types.contains(&TypeId::of::<T>())
     }

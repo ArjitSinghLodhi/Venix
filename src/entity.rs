@@ -7,9 +7,7 @@ pub struct Entity {
 
 impl Entity {
     pub(crate) fn new(registry_index: u32) -> Self {
-        Self {
-            registry_index: registry_index,
-        }
+        Self { registry_index }
     }
     #[inline(always)]
     pub fn registry_idx(&self) -> u32 {
@@ -20,8 +18,9 @@ impl Entity {
 impl Clone for Entity {
     fn clone(&self) -> Self {
         unsafe {
-        let cell_ptr = REGISTRY.get_ptr(self.registry_idx() as usize);
-            (*cell_ptr).handle_count
+            let cell_ptr = REGISTRY.get_ptr(self.registry_idx() as usize);
+            (*cell_ptr)
+                .handle_count
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
         Entity {
@@ -34,7 +33,8 @@ impl Drop for Entity {
     fn drop(&mut self) {
         unsafe {
             let cell_ptr = REGISTRY.get_ptr(self.registry_idx() as usize);
-            (*cell_ptr).handle_count
+            (*cell_ptr)
+                .handle_count
                 .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         }
     }

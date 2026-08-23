@@ -26,6 +26,10 @@ impl<T: Eq + Hash> AccessHashSet<T> {
     pub fn contains(&self, val: &T) -> bool {
         self.set.contains(val)
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.set.iter()
+    }
 }
 
 impl<T: Eq + Hash> Default for AccessHashSet<T> {
@@ -48,8 +52,11 @@ impl<T> AccessVec<T> {
     pub fn push(&mut self, val: T) {
         self.vec.push(val);
     }
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &T> {
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
         self.vec.iter()
+    }
+    pub fn as_slice(&self) -> &[T] {
+        self.vec.as_slice()
     }
 }
 
@@ -107,7 +114,7 @@ pub struct FunctionData {
 }
 
 impl FunctionData {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             last_run_generation: 0,
             current_run_generation: 0,

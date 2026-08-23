@@ -100,7 +100,7 @@ impl<'a, 'w, Q: WorldQuery, T: Sync> QueryArchetypeView<'a, 'w, Q, T> {
         Q::ReadOnlyItem<'w>: Send,
     {
         assert!(chunk_size > 0, "Chunk size must be greater than zero");
-        let indices_slice = &self.indices[..];
+        let indices_slice = self.indices;
         let len = self.indices.len();
         let safe_fetch = ThreadSafeFetch::<Q>(self.fetch);
 
@@ -142,7 +142,7 @@ impl<'a, 'w, Q: WorldQuery> QueryArchetypeView<'a, 'w, Q, Mutable> {
     {
         assert!(chunk_size > 0, "Chunk size must be greater than zero");
 
-        let indices_slice = &self.indices[..];
+        let indices_slice = self.indices;
         let len = indices_slice.len();
         let safe_fetch = ThreadSafeFetch::<Q>(self.fetch);
 

@@ -24,16 +24,13 @@ pub struct World {
 }
 
 impl World {
-    pub fn new() -> Self {
-        let archetypes_manager = ArchetypeManager::new();
-        let resources = FxHashMap::default();
-        let world = Self {
-            archetypes_manager,
-            resources,
+    pub(crate) fn new() -> Self {
+        Self {
+            archetypes_manager: ArchetypeManager::new(),
+            resources: FxHashMap::default(),
             commands: Arc::new(CommandBuffer::new()),
             free_indices_list: Vec::new(),
-        };
-        world
+        }
     }
     pub fn pre_allocate_archetype<T: ComponentTuple>(&mut self) {
         self.get_or_create_archetype_from_generic::<T>();
@@ -67,10 +64,9 @@ impl World {
 
         unsafe {
             let base_any = &mut *cell.get();
-            let casted_ref = base_any
+            base_any
                 .downcast_ref::<T>()
-                .expect("Resource type mismatch!");
-            casted_ref
+                .expect("Resource type mismatch!")
         }
     }
 
@@ -83,12 +79,28 @@ impl World {
             );
         });
         let base_any = cell.get_mut();
-        let casted_mut = base_any
+        base_any
             .downcast_mut::<T>()
-            .expect("Resource type mismatch!");
-        casted_mut
+            .expect("Resource type mismatch!")
+    }
+    pub fn get_resource_opt<T: 'static>(&self) -> Option<&T> {
+        let type_id = TypeId::of::<T>();
+        let cell = self.resources.get(&type_id)?;
+
+        unsafe {
+            let base_any = &mut *cell.get();
+            let casted_ref = base_any.downcast_ref::<T>()?;
+            Some(casted_ref)
+        }
     }
 
+    pub fn get_resource_mut_opt<T: 'static>(&mut self) -> Option<&mut T> {
+        let type_id = TypeId::of::<T>();
+        let cell = self.resources.get_mut(&type_id)?;
+        let base_any = cell.get_mut();
+        let casted_mut = base_any.downcast_mut::<T>()?;
+        Some(casted_mut)
+    }
     pub fn apply_commands(&mut self) {
         let commands = std::mem::replace(&mut self.commands, CommandBuffer::new().into());
 

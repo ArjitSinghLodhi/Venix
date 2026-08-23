@@ -5,7 +5,7 @@ pub mod query;
 mod registry;
 pub mod schedule;
 mod system;
-pub mod world;
+mod world;
 pub use rayon;
 pub mod resources;
 
@@ -25,6 +25,11 @@ pub mod prelude {
 
 pub mod extensions {
     pub use crate::system::validation::{
-        FunctionData, FunctionSystem, IntoSystem, IntoSystemConfigs, ParamAccess, SystemParam,
+        FunctionData, FunctionSystem, IntoSystem, IntoSystemConfigs, ParamAccess, System,
+        SystemParam,
     };
+    pub use crate::world::archetypes::{
+        AnyColumn, Archetype, ArchetypeId, ArchetypeManager, ComponentColumn,
+    };
+    pub use crate::world::storage::World;
 }
