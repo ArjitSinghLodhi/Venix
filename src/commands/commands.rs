@@ -124,17 +124,14 @@ pub struct DespawnCommand {
 impl DespawnCommand {
     pub fn apply(self, world: &mut World) {
         let target_registry_idx = self.entity.registry_index as usize;
-        let registry_ptr = std::ptr::addr_of_mut!(REGISTRY);
-
         let (arch_id, target_idx) = unsafe {
-            let vec = &mut (*registry_ptr).0;
-            let cell = &vec[target_registry_idx];
-
-            if cell.handle_count.load(std::sync::atomic::Ordering::Relaxed) > 0 {
+            let cell_ptr = REGISTRY.get_ptr(target_registry_idx as usize);
+            let cell_arch_id = (*cell_ptr).archetype_id;    
+            if (*cell_ptr).handle_count.load(std::sync::atomic::Ordering::Relaxed) > 0 {
                 let types_names = &&world
                     .archetypes_manager
                     .archetypes
-                    .get(&cell.archetype_id)
+                    .get(&(*cell_ptr).archetype_id)
                     .unwrap()
                     .type_names;
                 panic!(
@@ -143,7 +140,7 @@ impl DespawnCommand {
                 );
             }
 
-            (cell.archetype_id, cell.idx)
+            (cell_arch_id, (*cell_ptr).idx)
         };
 
         let arch = world
@@ -157,9 +154,8 @@ impl DespawnCommand {
                 arch.entities[last_idx as usize].registry_index as usize;
 
             unsafe {
-                let vec = &mut (*registry_ptr).0;
-                let swapped_cell = &mut vec[swapped_entity_registry_idx];
-                swapped_cell.idx = target_idx;
+                let swapped_cell_ptr = REGISTRY.get_mut_ptr(swapped_entity_registry_idx as usize);
+                (*swapped_cell_ptr).idx = target_idx; 
             }
         }
         world.free_indices_list.push(target_registry_idx as u32);
@@ -283,28 +279,27 @@ impl<T: ComponentTuple> WorldCommand for RemoveComponentsCommand<T> {
 #[inline(always)]
 fn get_registry_location(registry_idx: usize) -> (ArchetypeId, u32) {
     unsafe {
-        let vec = &(*std::ptr::addr_of!(REGISTRY)).0;
-        let cell = &vec[registry_idx];
-        (cell.archetype_id, cell.idx)
+        let cell_ptr = REGISTRY.get_ptr(registry_idx as usize);
+        let arch_id = (*cell_ptr).archetype_id;
+        (arch_id, (*cell_ptr).idx)
     }
 }
 
 #[inline(always)]
 fn update_registry_cell(registry_idx: usize, archetype_id: ArchetypeId, dense_idx: u32) {
     unsafe {
-        let vec = &mut (*std::ptr::addr_of_mut!(REGISTRY)).0;
-        let cell = &mut vec[registry_idx];
-        cell.archetype_id = archetype_id;
-        cell.idx = dense_idx;
+        let cell_ptr = REGISTRY.get_mut_ptr(registry_idx as usize);
+        (*cell_ptr).archetype_id = archetype_id;
+        (*cell_ptr).idx = dense_idx;
     }
 }
 
 fn alloc_registry_cell(archetype_id: ArchetypeId, dense_idx: u32, world: &mut World) -> u32 {
-    let registry_ptr = std::ptr::addr_of_mut!(REGISTRY);
+    let registry_ptr = &REGISTRY;
     if let Some(recycled_idx) = world.free_indices_list.pop() {
         unsafe {
-            let vec = &mut (*registry_ptr).0;
-            vec[recycled_idx as usize] = RegistryCell {
+            let cell_ptr = REGISTRY.get_mut_ptr(recycled_idx as usize);
+            (*cell_ptr) = RegistryCell {
                 archetype_id,
                 idx: dense_idx,
                 handle_count: std::sync::atomic::AtomicU32::new(0),
@@ -312,16 +307,13 @@ fn alloc_registry_cell(archetype_id: ArchetypeId, dense_idx: u32, world: &mut Wo
         }
         recycled_idx
     } else {
-        unsafe {
-            let vec = &mut (*registry_ptr).0;
-            let len = vec.len() as u32;
-            vec.push(RegistryCell {
-                archetype_id,
-                idx: dense_idx,
-                handle_count: std::sync::atomic::AtomicU32::new(0),
-            });
-            len
-        }
+        let len = (*registry_ptr).len() as u32;
+        (*registry_ptr).push(RegistryCell {
+            archetype_id,
+            idx: dense_idx,
+            handle_count: std::sync::atomic::AtomicU32::new(0),
+        });
+        len
     }
 }
 
@@ -459,9 +451,8 @@ unsafe fn swap_remove_entity_registry_update(arch: &mut Archetype, removed_row_i
     let last_idx = (arch.entities.len() - 1) as u32;
     if removed_row_idx != last_idx {
         let swapped_entity_registry_idx = arch.entities[last_idx as usize].registry_index as usize;
-        let vec = unsafe { &mut (*std::ptr::addr_of_mut!(REGISTRY)).0 };
-        let swapped_cell = &mut vec[swapped_entity_registry_idx];
-        swapped_cell.idx = removed_row_idx;
+        let swapped_cell = unsafe { REGISTRY.get_mut_ptr(swapped_entity_registry_idx) };
+        unsafe {(*swapped_cell).idx = removed_row_idx;}
     }
 }
 

@@ -20,8 +20,8 @@ impl Entity {
 impl Clone for Entity {
     fn clone(&self) -> Self {
         unsafe {
-            let cell = &REGISTRY.0[self.registry_index as usize];
-            cell.handle_count
+        let cell_ptr = REGISTRY.get_ptr(self.registry_idx() as usize);
+            (*cell_ptr).handle_count
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
         Entity {
@@ -33,8 +33,8 @@ impl Clone for Entity {
 impl Drop for Entity {
     fn drop(&mut self) {
         unsafe {
-            let cell = &REGISTRY.0[self.registry_index as usize];
-            cell.handle_count
+            let cell_ptr = REGISTRY.get_ptr(self.registry_idx() as usize);
+            (*cell_ptr).handle_count
                 .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         }
     }

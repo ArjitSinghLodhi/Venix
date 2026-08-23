@@ -239,12 +239,13 @@ impl<'w, Q: WorldQuery + 'w, F: Filter> Query<Q, F> {
                 }
             })
     }
-
     pub fn get(&self, entity: &Entity) -> Option<Q::ReadOnlyItem<'_>> {
         unsafe {
-            let cell = &REGISTRY.0[entity.registry_index as usize];
-            let arch_id = cell.archetype_id;
-            let row_idx = cell.idx;
+            let cell_ptr = REGISTRY.get_ptr(entity.registry_index as usize);
+
+            let arch_id = (*cell_ptr).archetype_id;
+            let row_idx = (*cell_ptr).idx;
+
             let fetch = self.cached_fetches[arch_id.id() as usize]?;
             Some(Q::fetch_read_only(fetch, row_idx as usize))
         }
@@ -252,9 +253,11 @@ impl<'w, Q: WorldQuery + 'w, F: Filter> Query<Q, F> {
 
     pub fn get_mut(&mut self, entity: &Entity) -> Option<Q::Item<'_>> {
         unsafe {
-            let cell = &REGISTRY.0[entity.registry_index as usize];
-            let arch_id = cell.archetype_id;
-            let row_idx = cell.idx;
+            let cell_ptr = REGISTRY.get_ptr(entity.registry_index as usize);
+
+            let arch_id = (*cell_ptr).archetype_id;
+            let row_idx = (*cell_ptr).idx;
+
             let fetch = self.cached_fetches[arch_id.id() as usize]?;
             Some(Q::fetch_mut(fetch, row_idx as usize))
         }
