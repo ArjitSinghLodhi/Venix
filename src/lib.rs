@@ -34,5 +34,6 @@ pub mod extensions {
         FunctionData, FunctionSystem, IntoSystem, IntoSystemConfigs, ParamAccess, System,
         SystemParam,
     };
+    pub use crate::world::archetypes::{Archetype, ComponentColumn};
     pub use crate::world::storage::World;
 }
