@@ -262,6 +262,7 @@ dependencies = [
 [[package]]
 name = "venix_derive"
 version = "1.0.0"
+source = "git+https://github.com/ArjitSinghLodhi/Venix_derive#e2bc596113cfa54544d09ee110383050069ecd02"
 dependencies = [
  "proc-macro2",
  "quote",

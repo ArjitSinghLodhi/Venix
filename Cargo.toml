@@ -14,7 +14,7 @@ default = []
 derive = ["dep:venix_derive"]
 
 [dependencies]
-venix_derive = { path = "venix_derive", version = "1.0.0", optional = true }
+venix_derive = { git = "https://github.com/ArjitSinghLodhi/Venix_derive", version = "1.0.0", optional = true }
 fxhash = "0.2.1"
 indexmap = "2.14.0"
 rayon = "1.12.0"
