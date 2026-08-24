@@ -31,8 +31,8 @@ pub mod prelude {
 
 pub mod extensions {
     pub use crate::system::validation::{
-        FunctionData, FunctionSystem, IntoSystem, IntoSystemConfigs, ParamAccess, System,
-        SystemParam,
+        AccessHashSet, AccessVec, FunctionData, FunctionSystem, IntoSystem, IntoSystemConfigs,
+        ParamAccess, System, SystemParam,
     };
     pub use crate::world::archetypes::{Archetype, ComponentColumn};
     pub use crate::world::storage::World;
