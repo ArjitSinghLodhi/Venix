@@ -17,7 +17,10 @@ pub mod prelude {
         app::App,
         plugin::{Plugin, PluginsBuildAll},
     };
-    pub use crate::commands::{commands::Commands, parallel_commands::ParallelCommands};
+    pub use crate::commands::{
+        bundle::Bundle,
+        {commands::Commands, parallel_commands::ParallelCommands},
+    };
     pub use crate::entity::Entity;
     pub use crate::query::{changed::*, ergonomic_params::*, filter::*, query::*};
     pub use crate::resources::*;
@@ -30,9 +33,6 @@ pub mod extensions {
     pub use crate::system::validation::{
         FunctionData, FunctionSystem, IntoSystem, IntoSystemConfigs, ParamAccess, System,
         SystemParam,
-    };
-    pub use crate::world::archetypes::{
-        AnyColumn, Archetype, ArchetypeId, ArchetypeManager, ComponentColumn,
     };
     pub use crate::world::storage::World;
 }

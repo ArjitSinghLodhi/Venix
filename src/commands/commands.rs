@@ -12,7 +12,10 @@ use indexmap::IndexMap;
 use thread_local::ThreadLocal;
 
 use crate::{
-    commands::command_queue::{CommandQueue, WorldCommand},
+    commands::{
+        bundle::Bundle,
+        command_queue::{CommandQueue, WorldCommand},
+    },
     entity::Entity,
     query::changed::TRACKED_COMPONENTS,
     registry::{REGISTRY, RegistryCell},
@@ -23,77 +26,11 @@ use crate::{
     },
 };
 
-pub trait ComponentTuple: 'static {
-    const TYPE_IDS: &[TypeId];
-    fn get_type_ids() -> &'static [TypeId];
-    fn push_to_archetype(self, archetype: &mut Archetype);
-    fn create_empty_columns(columns: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>);
-
-    type NamesArray: AsRef<[&'static str]>;
-    fn get_type_names() -> Self::NamesArray;
-}
-
-macro_rules! impl_component_tuple {
-    ($($T:ident),*) => {
-        impl<$($T: 'static),*> ComponentTuple for ($($T,)*) {
-
-            const TYPE_IDS: &[TypeId] = &[ $( TypeId::of::<$T>() ),* ];
-
-            fn get_type_ids() -> &'static [TypeId] {
-                Self::TYPE_IDS
-            }
-
-            fn create_empty_columns(columns: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>) {
-                $(
-                    let id = TypeId::of::<$T>();
-                    columns.insert(id, ComponentColumn {
-                        data: Box::new(Vec::<$T>::new()),
-                    });
-                )*
-            }
-
-            fn push_to_archetype(self, archetype: &mut Archetype) {
-                #[allow(non_snake_case)]
-                let ($($T,)*) = self;
-                unsafe {
-                    $(
-                        let vec_ptr = archetype.fetch_column_raw::<$T>();
-                        if !vec_ptr.is_null() {
-                            (*vec_ptr).push($T);
-                        }
-                    )*
-                }
-            }
-
-            type NamesArray = [&'static str; 0 $( + { let _ = stringify!($T); 1 } )*];
-
-            #[inline(always)]
-            fn get_type_names() -> Self::NamesArray {
-                [ $( std::any::type_name::<$T>() ),* ]
-            }
-        }
-    };
-}
-
-impl_component_tuple!(A);
-impl_component_tuple!(A, B);
-impl_component_tuple!(A, B, C);
-impl_component_tuple!(A, B, C, D);
-impl_component_tuple!(A, B, C, D, E);
-impl_component_tuple!(A, B, C, D, E, F);
-impl_component_tuple!(A, B, C, D, E, F, G);
-impl_component_tuple!(A, B, C, D, E, F, G, H);
-impl_component_tuple!(A, B, C, D, E, F, G, H, I);
-impl_component_tuple!(A, B, C, D, E, F, G, H, I, J);
-impl_component_tuple!(A, B, C, D, E, F, G, H, I, J, K);
-impl_component_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
-impl_component_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M);
-
-pub(crate) struct SpawnCommand<T: ComponentTuple> {
+pub(crate) struct SpawnCommand<T: Bundle> {
     pub(crate) components: T,
 }
 
-impl<T: ComponentTuple> WorldCommand for SpawnCommand<T> {
+impl<T: Bundle> WorldCommand for SpawnCommand<T> {
     fn apply(self, world: &mut World) {
         let arch_id = world.archetypes_manager.get_or_create_from_generic::<T>();
         let next_idx = match world.archetypes_manager.get(arch_id) {
@@ -179,12 +116,12 @@ impl DespawnCommand {
     }
 }
 
-pub(crate) struct AddComponentsCommand<T: ComponentTuple> {
+pub(crate) struct AddComponentsCommand<T: Bundle> {
     pub(crate) entity: Entity,
     pub(crate) components: T,
 }
 
-impl<T: ComponentTuple> WorldCommand for AddComponentsCommand<T> {
+impl<T: Bundle> WorldCommand for AddComponentsCommand<T> {
     fn apply(self, world: &mut World) {
         let target_registry_idx = self.entity.registry_index as usize;
         let (old_arch_id, old_idx) = get_registry_location(target_registry_idx);
@@ -235,12 +172,12 @@ impl<T: ComponentTuple> WorldCommand for AddComponentsCommand<T> {
     }
 }
 
-pub(crate) struct RemoveComponentsCommand<T: ComponentTuple> {
+pub(crate) struct RemoveComponentsCommand<T: Bundle> {
     pub(crate) entity: Entity,
     pub(crate) _marker: std::marker::PhantomData<T>,
 }
 
-impl<T: ComponentTuple> WorldCommand for RemoveComponentsCommand<T> {
+impl<T: Bundle> WorldCommand for RemoveComponentsCommand<T> {
     fn apply(self, world: &mut World) {
         let target_registry_idx = self.entity.registry_index as usize;
         let (old_arch_id, old_idx) = get_registry_location(target_registry_idx);
@@ -334,7 +271,7 @@ unsafe fn get_double_archetypes(
     (old_arch, new_arch)
 }
 
-fn create_addition_archetype<T: ComponentTuple>(
+fn create_addition_archetype<T: Bundle>(
     world: &mut World,
     old_arch_id: ArchetypeId,
     incoming_ids: &[TypeId],
@@ -361,7 +298,7 @@ fn create_addition_archetype<T: ComponentTuple>(
         .get_or_create_from_set(new_types, new_types_names)
 }
 
-fn create_subtraction_archetype<T: ComponentTuple>(
+fn create_subtraction_archetype<T: Bundle>(
     world: &mut World,
     old_arch_id: ArchetypeId,
     removed_ids: &[TypeId],
@@ -580,8 +517,8 @@ impl Commands<'_> {
         }
     }
 
-    pub fn spawn<T: ComponentTuple>(&mut self, components: T) {
-        self.push(SpawnCommand { components });
+    pub fn spawn<B: Bundle>(&mut self, bundle: B) {
+        self.push(SpawnCommand { components: bundle });
     }
 
     pub fn despawn(&mut self, entity: Entity) {
@@ -592,19 +529,18 @@ impl Commands<'_> {
         }
     }
 
-    pub fn add_components<C: ComponentTuple>(&mut self, entity: Entity, components: C) {
-        self.push(AddComponentsCommand { entity, components });
+    pub fn add_components<B: Bundle>(&mut self, entity: Entity, bundle: B) {
+        self.push(AddComponentsCommand {
+            entity,
+            components: bundle,
+        });
     }
 
-    pub fn remove_components<T: ComponentTuple>(&mut self, entity: Entity) {
+    pub fn remove_components<T: Bundle>(&mut self, entity: Entity) {
         self.push(RemoveComponentsCommand::<T> {
             entity,
             _marker: std::marker::PhantomData,
         });
-    }
-
-    pub unsafe fn push_raw<T: WorldCommand>(&mut self, cmd: T) {
-        self.push(cmd);
     }
 
     pub fn despawn_iter(&self) -> std::collections::hash_set::Iter<'_, DespawnCommand> {

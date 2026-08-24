@@ -15,12 +15,6 @@ impl<T: 'static> Res<T> {
         }
     }
 
-    pub fn from_ref(reference: &T) -> Self {
-        Res {
-            ptr: reference as *const T,
-            _marker: PhantomData,
-        }
-    }
     pub fn get(&self) -> &T {
         unsafe { &*self.ptr }
     }
@@ -46,12 +40,7 @@ impl<T: 'static> ResMut<T> {
             _marker: PhantomData,
         }
     }
-    pub fn from_ref(reference: &mut T) -> Self {
-        ResMut {
-            ptr: reference as *mut T,
-            _marker: PhantomData,
-        }
-    }
+
     pub fn get_mut(&mut self) -> &mut T {
         unsafe { &mut *self.ptr }
     }

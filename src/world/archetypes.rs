@@ -7,11 +7,9 @@ use std::{
 use fxhash::{FxBuildHasher, FxHashMap, FxHashSet};
 use indexmap::{IndexMap, IndexSet};
 
-use crate::{
-    commands::commands::ComponentTuple, entity::Entity, query::changed::TRACKED_COMPONENTS,
-};
+use crate::{commands::bundle::Bundle, entity::Entity, query::changed::TRACKED_COMPONENTS};
 
-pub trait AnyColumn: Any {
+pub(crate) trait AnyColumn: Any {
     unsafe fn swap_remove_erased(&mut self, idx: usize);
     fn as_any_mut(&mut self) -> &mut dyn Any;
     unsafe fn move_row_erased(&mut self, index: usize, dst: *mut dyn AnyColumn);
@@ -37,27 +35,27 @@ impl<T: 'static> AnyColumn for Vec<T> {
 }
 
 #[derive(Clone, Copy, PartialEq, Debug, Eq, Hash)]
-pub struct ArchetypeId(u32);
+pub(crate) struct ArchetypeId(u32);
 
 impl ArchetypeId {
-    pub fn new(id: u32) -> ArchetypeId {
+    pub(crate) fn new(id: u32) -> ArchetypeId {
         ArchetypeId(id)
     }
-    pub fn id(&self) -> u32 {
+    pub(crate) fn id(&self) -> u32 {
         self.0
     }
 }
 
 pub struct ComponentColumn {
-    pub data: Box<dyn AnyColumn>,
+    pub(crate) data: Box<dyn AnyColumn>,
 }
 
 pub struct Archetype {
-    pub id: ArchetypeId,
-    pub types: FxHashSet<TypeId>,
-    pub entities: Vec<Entity>,
-    pub columns: UnsafeCell<IndexMap<TypeId, ComponentColumn, FxBuildHasher>>,
-    pub type_names: IndexSet<&'static str, FxBuildHasher>,
+    pub(crate) id: ArchetypeId,
+    pub(crate) types: FxHashSet<TypeId>,
+    pub(crate) entities: Vec<Entity>,
+    pub(crate) columns: UnsafeCell<IndexMap<TypeId, ComponentColumn, FxBuildHasher>>,
+    pub(crate) type_names: IndexSet<&'static str, FxBuildHasher>,
 }
 
 unsafe impl Sync for Archetype {}
@@ -98,12 +96,13 @@ impl Archetype {
         let vec_ptr = col.data.as_any_mut().downcast_mut::<Vec<T>>()? as *mut Vec<T>;
         Some(vec_ptr)
     }
+
     pub(crate) fn id(&self) -> u32 {
         self.id.0
     }
 }
 
-pub struct ArchetypeManager {
+pub(crate) struct ArchetypeManager {
     index: FxHashMap<u64, ArchetypeId>,
     pub(crate) archetypes: FxHashMap<ArchetypeId, Archetype>,
     next_id: u32,
@@ -127,7 +126,7 @@ impl ArchetypeManager {
         combined_hash
     }
 
-    pub fn sync_tracking_markers(&self, types: &mut FxHashSet<TypeId>) {
+    pub(crate) fn sync_tracking_markers(&self, types: &mut FxHashSet<TypeId>) {
         if let Ok(tracked) = TRACKED_COMPONENTS.read() {
             for meta in tracked.iter() {
                 if types.contains(&meta.component_id) {
@@ -139,7 +138,7 @@ impl ArchetypeManager {
         }
     }
 
-    pub fn find_target_id_for_addition(
+    pub(crate) fn find_target_id_for_addition(
         &self,
         old_id: ArchetypeId,
         incoming_ids: &[TypeId],
@@ -154,7 +153,7 @@ impl ArchetypeManager {
         self.index.get(&hash).copied()
     }
 
-    pub fn find_target_id_for_subtraction(
+    pub(crate) fn find_target_id_for_subtraction(
         &self,
         old_id: ArchetypeId,
         removed_ids: &[TypeId],
@@ -169,7 +168,7 @@ impl ArchetypeManager {
         self.index.get(&hash).copied()
     }
 
-    pub fn get_or_create_from_set(
+    pub(crate) fn get_or_create_from_set(
         &mut self,
         types_set: FxHashSet<TypeId>,
         types_names_set: IndexSet<&'static str, FxBuildHasher>,
@@ -190,7 +189,7 @@ impl ArchetypeManager {
         new_id
     }
 
-    pub fn get_or_create_from_generic<T: ComponentTuple>(&mut self) -> ArchetypeId {
+    pub(crate) fn get_or_create_from_generic<T: Bundle>(&mut self) -> ArchetypeId {
         let incoming_ids = T::get_type_ids();
         let mut types_set =
             FxHashSet::with_capacity_and_hasher(incoming_ids.len(), FxBuildHasher::default());
@@ -235,11 +234,11 @@ impl ArchetypeManager {
         new_id
     }
 
-    pub fn get(&self, id: ArchetypeId) -> Option<&Archetype> {
+    pub(crate) fn get(&self, id: ArchetypeId) -> Option<&Archetype> {
         self.archetypes.get(&id)
     }
 
-    pub fn get_mut(&mut self, id: ArchetypeId) -> Option<&mut Archetype> {
+    pub(crate) fn get_mut(&mut self, id: ArchetypeId) -> Option<&mut Archetype> {
         self.archetypes.get_mut(&id)
     }
 }

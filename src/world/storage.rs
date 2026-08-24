@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    commands::commands::{CommandBuffer, ComponentTuple},
+    commands::{bundle::Bundle, commands::CommandBuffer},
     query::changed::TRACKED_COMPONENTS,
     registry::REGISTRY,
     world::archetypes::{ArchetypeId, ArchetypeManager},
@@ -16,7 +16,7 @@ use crate::{
 
 pub(crate) static CURRENT_FRAME_GENERATION: AtomicU8 = AtomicU8::new(1);
 pub struct World {
-    pub archetypes_manager: ArchetypeManager,
+    pub(crate) archetypes_manager: ArchetypeManager,
     pub(crate) resources:
         FxHashMap<std::any::TypeId, std::cell::UnsafeCell<Box<dyn std::any::Any>>>,
     pub(crate) commands: Arc<CommandBuffer>,
@@ -32,13 +32,11 @@ impl World {
             free_indices_list: Vec::new(),
         }
     }
-    pub fn pre_allocate_archetype<T: ComponentTuple>(&mut self) {
+    pub fn pre_allocate_archetype<T: Bundle>(&mut self) {
         self.get_or_create_archetype_from_generic::<T>();
     }
 
-    pub(crate) fn get_or_create_archetype_from_generic<T: ComponentTuple>(
-        &mut self,
-    ) -> ArchetypeId {
+    pub(crate) fn get_or_create_archetype_from_generic<T: Bundle>(&mut self) -> ArchetypeId {
         self.archetypes_manager.get_or_create_from_generic::<T>()
     }
 
@@ -101,6 +99,7 @@ impl World {
         let casted_mut = base_any.downcast_mut::<T>()?;
         Some(casted_mut)
     }
+
     pub fn apply_commands(&mut self) {
         let commands = std::mem::replace(&mut self.commands, CommandBuffer::new().into());
 

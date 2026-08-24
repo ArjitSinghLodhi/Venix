@@ -4,7 +4,7 @@ use std::ptr;
 
 use crate::world::storage::World;
 
-pub trait WorldCommand: 'static {
+pub(crate) trait WorldCommand: 'static {
     fn apply(self, world: &mut World);
 }
 
