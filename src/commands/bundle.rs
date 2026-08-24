@@ -4,7 +4,7 @@ use std::any::TypeId;
 
 use crate::world::archetypes::{Archetype, ComponentColumn};
 
-pub trait Bundle: 'static {
+pub trait ComponentBundle: 'static {
     const TYPE_IDS: &[TypeId];
     fn get_type_ids() -> &'static [TypeId];
     fn push_to_archetype(self, archetype: &mut Archetype);
@@ -16,7 +16,7 @@ pub trait Bundle: 'static {
 
 macro_rules! impl_component_tuple {
     ($($T:ident),*) => {
-        impl<$($T: 'static),*> Bundle for ($($T,)*) {
+        impl<$($T: 'static),*> ComponentBundle for ($($T,)*) {
 
             const TYPE_IDS: &[TypeId] = &[ $( TypeId::of::<$T>() ),* ];
 

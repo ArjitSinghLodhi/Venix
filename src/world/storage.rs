@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    commands::{bundle::Bundle, commands::CommandBuffer},
+    commands::{bundle::ComponentBundle, commands::CommandBuffer},
     query::changed::TRACKED_COMPONENTS,
     registry::REGISTRY,
     world::archetypes::{ArchetypeId, ArchetypeManager},
@@ -32,11 +32,11 @@ impl World {
             free_indices_list: Vec::new(),
         }
     }
-    pub fn pre_allocate_archetype<T: Bundle>(&mut self) {
+    pub fn pre_allocate_archetype<T: ComponentBundle>(&mut self) {
         self.get_or_create_archetype_from_generic::<T>();
     }
 
-    pub(crate) fn get_or_create_archetype_from_generic<T: Bundle>(&mut self) -> ArchetypeId {
+    pub(crate) fn get_or_create_archetype_from_generic<T: ComponentBundle>(&mut self) -> ArchetypeId {
         self.archetypes_manager.get_or_create_from_generic::<T>()
     }
 

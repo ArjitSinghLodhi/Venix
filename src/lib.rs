@@ -11,16 +11,24 @@ mod world;
 pub use fxhash;
 pub use indexmap;
 pub use rayon;
-
+#[cfg(feature = "derive")]
+pub mod derive {
+    pub use venix_derive::ComponentBundle;
+    pub use venix_derive::QueryFilter;
+    pub use venix_derive::SystemParam;
+    pub use venix_derive::QueryData;
+}
 pub mod prelude {
     pub use crate::app::{
         app::App,
         plugin::{Plugin, PluginsBuildAll},
     };
     pub use crate::commands::{
-        bundle::Bundle,
+        bundle::ComponentBundle,
         {commands::Commands, parallel_commands::ParallelCommands},
     };
+    #[cfg(feature = "derive")]
+    pub use crate::derive::*;
     pub use crate::entity::Entity;
     pub use crate::query::{changed::*, ergonomic_params::*, filter::*, query::*};
     pub use crate::resources::*;

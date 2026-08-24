@@ -13,7 +13,7 @@ use thread_local::ThreadLocal;
 
 use crate::{
     commands::{
-        bundle::Bundle,
+        bundle::ComponentBundle,
         command_queue::{CommandQueue, WorldCommand},
     },
     entity::Entity,
@@ -26,11 +26,11 @@ use crate::{
     },
 };
 
-pub(crate) struct SpawnCommand<T: Bundle> {
+pub(crate) struct SpawnCommand<T: ComponentBundle> {
     pub(crate) components: T,
 }
 
-impl<T: Bundle> WorldCommand for SpawnCommand<T> {
+impl<T: ComponentBundle> WorldCommand for SpawnCommand<T> {
     fn apply(self, world: &mut World) {
         let arch_id = world.archetypes_manager.get_or_create_from_generic::<T>();
         let next_idx = match world.archetypes_manager.get(arch_id) {
@@ -116,12 +116,12 @@ impl DespawnCommand {
     }
 }
 
-pub(crate) struct AddComponentsCommand<T: Bundle> {
+pub(crate) struct AddComponentsCommand<T: ComponentBundle> {
     pub(crate) entity: Entity,
     pub(crate) components: T,
 }
 
-impl<T: Bundle> WorldCommand for AddComponentsCommand<T> {
+impl<T: ComponentBundle> WorldCommand for AddComponentsCommand<T> {
     fn apply(self, world: &mut World) {
         let target_registry_idx = self.entity.registry_index as usize;
         let (old_arch_id, old_idx) = get_registry_location(target_registry_idx);
@@ -172,12 +172,12 @@ impl<T: Bundle> WorldCommand for AddComponentsCommand<T> {
     }
 }
 
-pub(crate) struct RemoveComponentsCommand<T: Bundle> {
+pub(crate) struct RemoveComponentsCommand<T: ComponentBundle> {
     pub(crate) entity: Entity,
     pub(crate) _marker: std::marker::PhantomData<T>,
 }
 
-impl<T: Bundle> WorldCommand for RemoveComponentsCommand<T> {
+impl<T: ComponentBundle> WorldCommand for RemoveComponentsCommand<T> {
     fn apply(self, world: &mut World) {
         let target_registry_idx = self.entity.registry_index as usize;
         let (old_arch_id, old_idx) = get_registry_location(target_registry_idx);
@@ -271,7 +271,7 @@ unsafe fn get_double_archetypes(
     (old_arch, new_arch)
 }
 
-fn create_addition_archetype<T: Bundle>(
+fn create_addition_archetype<T: ComponentBundle>(
     world: &mut World,
     old_arch_id: ArchetypeId,
     incoming_ids: &[TypeId],
@@ -298,7 +298,7 @@ fn create_addition_archetype<T: Bundle>(
         .get_or_create_from_set(new_types, new_types_names)
 }
 
-fn create_subtraction_archetype<T: Bundle>(
+fn create_subtraction_archetype<T: ComponentBundle>(
     world: &mut World,
     old_arch_id: ArchetypeId,
     removed_ids: &[TypeId],
@@ -517,8 +517,8 @@ impl Commands<'_> {
         }
     }
 
-    pub fn spawn<B: Bundle>(&mut self, bundle: B) {
-        self.push(SpawnCommand { components: bundle });
+    pub fn spawn<B: ComponentBundle>(&mut self, components: B) {
+        self.push(SpawnCommand { components });
     }
 
     pub fn despawn(&mut self, entity: Entity) {
@@ -529,14 +529,14 @@ impl Commands<'_> {
         }
     }
 
-    pub fn add_components<B: Bundle>(&mut self, entity: Entity, bundle: B) {
+    pub fn add_components<B: ComponentBundle>(&mut self, entity: Entity, components: B) {
         self.push(AddComponentsCommand {
             entity,
-            components: bundle,
+            components,
         });
     }
 
-    pub fn remove_components<T: Bundle>(&mut self, entity: Entity) {
+    pub fn remove_components<T: ComponentBundle>(&mut self, entity: Entity) {
         self.push(RemoveComponentsCommand::<T> {
             entity,
             _marker: std::marker::PhantomData,

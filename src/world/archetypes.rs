@@ -7,7 +7,7 @@ use std::{
 use fxhash::{FxBuildHasher, FxHashMap, FxHashSet};
 use indexmap::{IndexMap, IndexSet};
 
-use crate::{commands::bundle::Bundle, entity::Entity, query::changed::TRACKED_COMPONENTS};
+use crate::{commands::bundle::ComponentBundle, entity::Entity, query::changed::TRACKED_COMPONENTS};
 
 pub(crate) trait AnyColumn: Any {
     unsafe fn swap_remove_erased(&mut self, idx: usize);
@@ -189,7 +189,7 @@ impl ArchetypeManager {
         new_id
     }
 
-    pub(crate) fn get_or_create_from_generic<T: Bundle>(&mut self) -> ArchetypeId {
+    pub(crate) fn get_or_create_from_generic<T: ComponentBundle>(&mut self) -> ArchetypeId {
         let incoming_ids = T::get_type_ids();
         let mut types_set =
             FxHashSet::with_capacity_and_hasher(incoming_ids.len(), FxBuildHasher::default());

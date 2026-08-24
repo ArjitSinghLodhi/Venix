@@ -8,7 +8,7 @@ use fxhash::{FxBuildHasher, FxHashMap, FxHashSet};
 
 use crate::{
     app::plugin::PluginsBuildAll,
-    commands::bundle::Bundle,
+    commands::bundle::ComponentBundle,
     schedule::{
         schedule::{IntoScheduleId, Schedule, ScheduleId, ScheduleLabel, SchedulePlace},
         schedules_list::Startup,
@@ -204,7 +204,7 @@ impl App {
         self.world.get_resource_mut::<T>()
     }
 
-    pub fn pre_allocate_archetype<T: Bundle>(&mut self) {
+    pub fn pre_allocate_archetype<T: ComponentBundle>(&mut self) {
         self.world.pre_allocate_archetype::<T>();
     }
 

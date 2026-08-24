@@ -1,35 +1,54 @@
 # Venix ECS Engine
 
-A deterministic, high-concurrency Entity Component System written in pure, checked Rust. This framework provides zero-overhead memory layouts, structural safety guarantees under strict compile-time/startup runtime verification, and isolated execution pipelines.
-
-## Architectural Design
-
-* **Guaranteed Memory Safety:** Operates with absolute zero undefined behaviour. Component Lifetimes, simultaneous aliasing rules, and cross-thread access patterns are validated by the compiler.
-* **Dense Archetype Layouts:** Organizes entities sharing identical component patterns into unified memory blocks. This approach speeds up linear iterations, enhances CPU data cache line usage, and supports localized memory operations.
-* **Native Thread Scaling:** Integrates with the Rayon work-stealing thread pool to distribute entity batches dynamically across logical processor cores during complex simulation loops.
-* **Type-Filter Routing:** Uses standard type constraints like With, Without, and state tracking filters like Changed to isolate queries instantly without dynamic inspection costs.
-* **Deferred Structural Commits:** Schedules operational shifts—including object lifecycle mutations or component insertions—into isolated Command queues. Modifications execute linearly at system boundary sync points to keep active iteration views stable.
-* **Global Configuration Management:** Provides safe execution methods to update isolated shared parameters using centralized resource references alongside standard component arrays.
+A deterministic, high-concurrency Entity Component System written in Rust. Venix provides zero-overhead structural memory layouts, compile-time concurrency verification, and vectorized parallel execution pipelines.
 
 ---
 
-## ⚠️ State Evolution Lifecycle Limitation
+## Performance & Invariant Guarantees
 
-The runtime uses an explicit generational ticking approach to record state changes within the Changed query filter pipeline.
-
-**Operational Rule:** Any structural property change can only be safely evaluated for a window of **exactly 2 frames**.
-
-* **Generation Frame N:** Properties are altered; a local flag tracks the initialization shift.
-* **Generation Frame N+1:** The bitmask is retained, allowing connected downstream evaluation tasks to run.
-* **Generation Frame N+2:** The state tracker is reset or overwritten.
-
-Systems filtering tasks via Changed must complete their logic updates within this restricted 2-frame window. If execution is delayed past this interval by custom schedule runner or something else, the target data flags drop and the modification visibility is lost and has a possibility of breaking things.
+* **Validated by Miri:** The internal engine utilizes raw pointer offsets and dense tabular memory operations. The entire codebase compiles with zero undefined behavior and strictly passes full miri verification.
+* **Dense Archetype Architecture:** Entities sharing identical component configurations are packed contiguously into unified archetype tables. This layout ensures sequential vector access, eliminates indirect pointer hopping, and maximizes CPU L1/L2 cache line utility.
+* **Work-Stealing Concurrency:** Native integration with a high-performance Rayon worker pool enables parallel processing over archetype data batches without runtime dispatch overhead.
+* **Static Access Routing:** Query parameter bounds constraints (With, Without, Changed) to resolve structural archetype filtering paths instantly before execution loops initiate.
+* **Linear Synchronized Commits:** Mutative operations—including lifecycle spawning, structural insertions, and removals—are deferred into thread-local ParallelCommands buffers. Modifications are flushed linearly at system boundary synchronization checkpoints to maintain reference stability.
 
 ---
 
-## Extras
-While Prelude module gives you everyday things you need imported.
+## ⚠️ State Evolution Lifecycle Constraints
 
-extensions module gives you extra things you can use to make your own custom params possibly too.
+Venix tracks runtime data modifications through an explicit generational bitmask pipeline.
 
-and a lot of public traits which you can do many things with
+**Operational Rule:** Any structural property change or mutable access evaluated via the Changed filter remains valid for a window of exactly 2 execution frames.
+
+* **Generation Frame N:** Data properties are altered. An internal tracker initializes the change token.
+* **Generation Frame N+1:** The modification state is actively maintained. This allows downstream filtered queries to identify and react to the change event.
+* **Generation Frame N+2:** The generation counter shifts. The modification token is overwritten or reset, and its visibility is dropped.
+
+Note: All logic tracking changes via Changed filters must execute within this 2-frame boundary. If custom runner architectures delay system dispatch past this window, the mutation visibility is lost.
+
+---
+
+## Feature Overview
+
+### Procedural Macro Derives
+Enable the derive feature flag to unlock zero-cost data abstractions. The engine's code generation framework automatically handles visibility and structure:
+
+* `#[derive(ComponentBundle)]` – Packs loose components into cohesive spawning layouts.
+* `#[derive(QueryData)]` – Maps fields directly to underlying raw archetype columns.
+* `#[derive(QueryFilter)]` – Combines multiple composition criteria into specialized filters.
+* `#[derive(SystemParam)]` – Groups complex queries, thread-local command buffers, and shared resources into unified system signatures.
+
+### Extensibility Core
+* **prelude:** Re-exports standard primitives, queries, scheduling components, and primitives for everyday application usage.
+* **extensions:** Exposes low-level archetypal columns, access trackers, and execution handles for anyone to add on top of venix.
+
+---
+
+## License
+
+Venix is dual-licensed under either:
+
+* Apache License, Version 2.0 (LICENSE-APACHE)
+* MIT license (LICENSE-MIT)
+
+at your option.
