@@ -13,10 +13,10 @@ pub use indexmap;
 pub use rayon;
 #[cfg(feature = "derive")]
 pub mod derive {
-    pub use venix_derive::ComponentBundle;
-    pub use venix_derive::QueryFilter;
-    pub use venix_derive::SystemParam;
-    pub use venix_derive::QueryData;
+    pub use venix_macros::ComponentBundle;
+    pub use venix_macros::QueryFilter;
+    pub use venix_macros::SystemParam;
+    pub use venix_macros::QueryData;
 }
 pub mod prelude {
     pub use crate::app::{

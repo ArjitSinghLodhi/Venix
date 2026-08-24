@@ -11,10 +11,10 @@ categories = ["game-engines", "development-tools"]
 
 [features]
 default = []
-derive = ["dep:venix_derive"]
+derive = ["dep:venix_macros"]
 
 [dependencies]
-venix_derive = { git = "https://github.com/ArjitSinghLodhi/Venix_derive", version = "1.0.0", optional = true }
+venix_macros = { version = "1.0.0", optional = true }
 fxhash = "0.2.1"
 indexmap = "2.14.0"
 rayon = "1.12.0"

@@ -256,13 +256,14 @@ dependencies = [
  "rayon",
  "rusty-fork",
  "thread_local",
- "venix_derive",
+ "venix_macros",
 ]
 
 [[package]]
-name = "venix_derive"
+name = "venix_macros"
 version = "1.0.0"
-source = "git+https://github.com/ArjitSinghLodhi/Venix_derive#e2bc596113cfa54544d09ee110383050069ecd02"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e62df0a36a372352a3b7edd3bd3e9679c2f8abdc9a86eb38f46b02b17858808"
 dependencies = [
  "proc-macro2",
  "quote",
