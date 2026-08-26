@@ -28,9 +28,9 @@ impl SystemParam for ParallelCommands {
 }
 
 impl ParallelCommands {
-    pub fn scope<F>(&self, f: F)
+    pub fn scope<F, R>(&self, f: F) -> R
     where
-        F: for<'b> FnOnce(Commands<'b>),
+        F: for<'b> FnOnce(Commands<'b>) -> R,
     {
         unsafe {
             let slot = (*self.master_buffer_ptr).local_data.get_or(|| LocalSlot {
@@ -49,7 +49,7 @@ impl ParallelCommands {
                     master_buffer: self.master_buffer_ptr,
                     _marker: std::marker::PhantomData,
                 };
-                f(commands);
+                f(commands)
             } else {
                 let heap_box = Box::new(CommandsBufferData::new());
                 let heap_ptr = Box::into_raw(heap_box);
@@ -60,7 +60,7 @@ impl ParallelCommands {
                     master_buffer: self.master_buffer_ptr,
                     _marker: std::marker::PhantomData,
                 };
-                f(commands);
+                f(commands)
             }
         }
     }

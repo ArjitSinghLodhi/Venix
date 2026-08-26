@@ -9,7 +9,7 @@ use fxhash::{FxBuildHasher, FxHashMap, FxHashSet};
 use crate::{
     app::plugin::PluginsBuildAll,
     commands::bundle::ComponentBundle,
-    events::{EventQueue, register_event},
+    events::{EventBuffer, register_event},
     extensions::SystemExt,
     schedule::{
         schedule::{IntoScheduleId, Schedule, ScheduleId, ScheduleLabel, SchedulePlace},
@@ -151,10 +151,10 @@ impl App {
         self
     }
 
-    pub fn init_event<T: 'static>(&mut self) -> &mut Self {
+    pub fn init_event<T: 'static + Send>(&mut self) -> &mut Self {
         self.configuration.not_ready();
-        if let None = self.world.get_resource_opt::<EventQueue<T>>() {
-            self.world.insert_resource(EventQueue::<T>::new());
+        if let None = self.world.get_resource_opt::<EventBuffer<T>>() {
+            self.world.insert_resource(EventBuffer::<T>::new());
         } else {
             panic!("Event: {} Already initialized", type_name::<T>())
         }

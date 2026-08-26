@@ -40,7 +40,6 @@ fn pre_mutation_verify_system(
         .map(|view| view.len())
         .sum::<usize>();
 
-    // Avoid lifetime issues by counting matching items directly inside each view pass
     let mut pos_tracker_changes = 0;
     for view in pos_tracker_query.iter() {
         for tracker in view.iter() {

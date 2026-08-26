@@ -1,4 +1,5 @@
 use rusty_fork::rusty_fork_test;
+use std::thread;
 use venix::events::{EventReader, EventWriter};
 use venix::prelude::*;
 
@@ -102,6 +103,95 @@ rusty_fork_test! {
             );
 
         app.set_runner(test_runner_frames);
+        app.run();
+    }
+}
+
+fn parallel_execution_system(
+    counter: Res<FrameCounter>,
+    reader: EventReader<ThreatEvent>,
+    mut writer: EventWriter<ThreatEvent>,
+    par_writer: ParallelEventWriter<ThreatEvent>,
+) {
+    if counter.current_frame == 1 {
+        writer.send(ThreatEvent { value: 100.0 });
+
+        thread::scope(|s| {
+            let reader_ref = &reader;
+            let par_writer_ref = &par_writer;
+
+            s.spawn(move || {
+                let _ = reader_ref.read().count();
+            });
+
+            s.spawn(move || {
+                par_writer_ref.scope(|mut scoped_writer| {
+                    for _ in 0..5 {
+                        scoped_writer.send(ThreatEvent { value: 10.0 });
+                    }
+                });
+            });
+
+            s.spawn(move || {
+                par_writer_ref.scope(|mut scoped_writer| {
+                    for _ in 0..5 {
+                        scoped_writer.send(ThreatEvent { value: 10.0 });
+                    }
+                });
+            });
+        });
+    }
+}
+
+fn parallel_verification_system(counter: Res<FrameCounter>, reader: EventReader<ThreatEvent>) {
+    let count = reader.read().count();
+
+    if counter.current_frame == 1 {
+        assert_eq!(count, 11);
+
+        let mut base_count = 0;
+        let mut parallel_count = 0;
+
+        for event in reader.read() {
+            if event.value == 100.0 {
+                base_count += 1;
+            } else if event.value == 10.0 {
+                parallel_count += 1;
+            }
+        }
+
+        assert_eq!(base_count, 1);
+        assert_eq!(parallel_count, 10);
+    } else if counter.current_frame == 2 {
+        assert_eq!(count, 0);
+    }
+}
+
+fn test_two_frames(app: &mut App) {
+    app.build();
+    app.run_startup();
+
+    app.update();
+    app.update();
+}
+
+rusty_fork_test! {
+    #[test]
+    fn test_events_parallel_lifecycle() {
+        let mut app = App::new();
+        app.add_plugins(DefaultSchedulesPlugin)
+            .insert_resource(FrameCounter { current_frame: 0 })
+            .init_event::<ThreatEvent>()
+            .add_systems(
+                Update::id(),
+                (
+                    increment_frame_system,
+                    parallel_execution_system,
+                    parallel_verification_system,
+                ),
+            );
+
+        app.set_runner(test_two_frames);
         app.run();
     }
 }

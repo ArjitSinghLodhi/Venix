@@ -30,7 +30,7 @@ pub(crate) struct SpawnCommand<T: ComponentBundle> {
     pub(crate) components: T,
 }
 
-impl<T: ComponentBundle> WorldCommand for SpawnCommand<T> {
+impl<T: ComponentBundle + Send> WorldCommand for SpawnCommand<T> {
     fn apply(self, world: &mut World) {
         let arch_id = world.archetypes_manager.get_or_create_from_generic::<T>();
         let next_idx = match world.archetypes_manager.get(arch_id) {
@@ -121,7 +121,7 @@ pub(crate) struct AddComponentsCommand<T: ComponentBundle> {
     pub(crate) components: T,
 }
 
-impl<T: ComponentBundle> WorldCommand for AddComponentsCommand<T> {
+impl<T: ComponentBundle + Send> WorldCommand for AddComponentsCommand<T> {
     fn apply(self, world: &mut World) {
         let target_registry_idx = self.entity.registry_index as usize;
         let (old_arch_id, old_idx) = get_registry_location(target_registry_idx);
@@ -177,7 +177,7 @@ pub struct InsertComponentsCommand<T: ComponentBundle> {
     pub components: T,
 }
 
-impl<T: ComponentBundle> WorldCommand for InsertComponentsCommand<T> {
+impl<T: ComponentBundle + Send> WorldCommand for InsertComponentsCommand<T> {
     fn apply(self, world: &mut World) {
         let target_registry_idx = self.entity.registry_index as usize;
         let (old_arch_id, old_idx) = get_registry_location(target_registry_idx);
@@ -247,7 +247,7 @@ pub(crate) struct RemoveComponentsCommand<T: ComponentBundle> {
     pub(crate) _marker: std::marker::PhantomData<T>,
 }
 
-impl<T: ComponentBundle> WorldCommand for RemoveComponentsCommand<T> {
+impl<T: ComponentBundle + Send> WorldCommand for RemoveComponentsCommand<T> {
     fn apply(self, world: &mut World) {
         let target_registry_idx = self.entity.registry_index as usize;
         let (old_arch_id, old_idx) = get_registry_location(target_registry_idx);
@@ -587,7 +587,7 @@ impl Commands<'_> {
         }
     }
 
-    pub fn spawn<B: ComponentBundle>(&mut self, components: B) {
+    pub fn spawn<B: ComponentBundle + Send>(&mut self, components: B) {
         self.push(SpawnCommand { components });
     }
 
@@ -599,23 +599,40 @@ impl Commands<'_> {
         }
     }
 
-    pub fn add_components<C: ComponentBundle>(&mut self, entity: Entity, components: C) {
+    pub fn add_components<C: ComponentBundle + Send>(&mut self, entity: Entity, components: C) {
         self.push(AddComponentsCommand { entity, components });
     }
 
-    pub fn remove_components<C: ComponentBundle>(&mut self, entity: Entity) {
+    pub fn remove_components<C: ComponentBundle + Send>(&mut self, entity: Entity) {
         self.push(RemoveComponentsCommand::<C> {
             entity,
             _marker: std::marker::PhantomData,
         });
     }
 
-    pub fn insert_components<C: ComponentBundle>(&mut self, entity: Entity, components: C) {
+    pub fn insert_components<C: ComponentBundle + Send>(&mut self, entity: Entity, components: C) {
         self.push(InsertComponentsCommand { entity, components });
     }
 
-    pub fn despawn_iter(&self) -> std::collections::hash_set::Iter<'_, DespawnCommand> {
-        unsafe { (*self.local_data).despawns.iter() }
+    pub fn despawn_iter<F>(&self, mut f: F)
+    where
+        F: for<'b> FnMut(&'b Entity),
+    {
+        let buff = unsafe { (*self.master_buffer).data.read().unwrap() };
+        for cmd in buff.despawns.iter() {
+            f(cmd.despawn_target())
+        }
+    }
+
+    pub fn despawn_iter_local<F>(&self, mut f: F)
+    where
+        F: for<'b> FnMut(&'b Entity),
+    {
+        unsafe {
+            for cmd in (*self.local_data).despawns.iter() {
+                f(cmd.despawn_target())
+            }
+        }
     }
 }
 
