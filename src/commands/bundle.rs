@@ -8,8 +8,8 @@ pub trait ComponentBundle: 'static {
     const TYPE_IDS: &[TypeId];
     fn get_type_ids() -> &'static [TypeId];
     fn push_to_archetype(self, archetype: &mut Archetype);
+    unsafe fn insert_to_archetype(self, archetype: &mut Archetype, row_idx: usize);
     fn create_empty_columns(columns: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>);
-
     type NamesArray: AsRef<[&'static str]>;
     fn get_type_names() -> Self::NamesArray;
 }
@@ -45,7 +45,24 @@ macro_rules! impl_component_tuple {
                     )*
                 }
             }
-
+            unsafe fn insert_to_archetype(self, archetype: &mut Archetype, row_idx: usize) {
+                #[allow(non_snake_case)]
+                let ($($T,)*) = self;
+                unsafe {
+                    $(
+                        let vec_ptr = archetype.fetch_column_raw::<$T>();
+                        if !vec_ptr.is_null() {
+                            let vec_ref = &mut *vec_ptr;
+                            if row_idx < vec_ref.len() {
+                                std::ptr::drop_in_place(&mut vec_ref[row_idx]);
+                                std::ptr::write(&mut vec_ref[row_idx], $T);
+                            } else {
+                                vec_ref.push($T);
+                            }
+                        }
+                    )*
+                }
+            }
             type NamesArray = [&'static str; 0 $( + { let _ = stringify!($T); 1 } )*];
 
             #[inline(always)]

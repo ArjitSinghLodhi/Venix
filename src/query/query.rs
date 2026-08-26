@@ -1,28 +1,44 @@
+use std::any::TypeId;
+
+use fxhash::FxHashSet;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use crate::{
     entity::Entity,
-    query::{
-        filter::{EmptyFilter, Filter},
-        params::WorldQuery,
-    },
+    extensions::{AccessVec, ParamAccess, SystemParam},
+    query::filter::{EmptyQueryFilter, QueryFilter},
     registry::REGISTRY,
     system::validation::{AccessHashSet, FunctionData},
     world::{archetypes::Archetype, storage::World},
 };
 
+pub trait QueryData {
+    type Item<'w>;
+    type ReadOnlyItem<'w>;
+    type Fetch: Copy;
+
+    fn matches(types: &FxHashSet<TypeId>) -> bool;
+    unsafe fn init_fetch(archetype: &Archetype, systems_data: &mut FunctionData) -> Self::Fetch;
+    fn collect_access(
+        reads: &mut AccessVec<std::any::TypeId>,
+        writes: &mut AccessVec<std::any::TypeId>,
+    );
+    unsafe fn fetch_mut<'w>(fetch: Self::Fetch, index: usize) -> Self::Item<'w>;
+    unsafe fn fetch_read_only<'w>(fetch: Self::Fetch, index: usize) -> Self::ReadOnlyItem<'w>;
+}
+
 pub struct Mutable;
 pub struct ReadOnly;
 
-pub struct QuerySubChunk<'a, 'w, Q: WorldQuery, I> {
+pub struct QuerySubChunk<'w, Q: QueryData, I> {
     safe_fetch: ThreadSafeFetch<Q>,
-    sub_indices: &'a [usize],
-    _marker: std::marker::PhantomData<&'w I>,
+    sub_indices: &'w [usize],
+    _marker: std::marker::PhantomData<I>,
 }
 
-impl<'a, 'w, Q: WorldQuery, T> QuerySubChunk<'a, 'w, Q, T> {
+impl<'w, Q: QueryData, T> QuerySubChunk<'w, Q, T> {
     #[inline(always)]
-    pub fn iter(&self) -> impl Iterator<Item = Q::ReadOnlyItem<'w>> + '_ {
+    pub fn iter<'b>(&'b self) -> impl Iterator<Item = Q::ReadOnlyItem<'b>> {
         let safe_fetch = self.safe_fetch.clone();
         self.sub_indices
             .iter()
@@ -30,9 +46,9 @@ impl<'a, 'w, Q: WorldQuery, T> QuerySubChunk<'a, 'w, Q, T> {
     }
 }
 
-impl<'a, 'w, Q: WorldQuery> QuerySubChunk<'a, 'w, Q, Mutable> {
+impl<'w, Q: QueryData> QuerySubChunk<'w, Q, Mutable> {
     #[inline(always)]
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = Q::Item<'w>> + '_ {
+    pub fn iter_mut<'b>(&'b mut self) -> impl Iterator<Item = Q::Item<'b>> {
         let safe_fetch = self.safe_fetch.clone();
         self.sub_indices
             .iter()
@@ -41,18 +57,18 @@ impl<'a, 'w, Q: WorldQuery> QuerySubChunk<'a, 'w, Q, Mutable> {
 }
 
 #[derive(Copy)]
-struct ThreadSafeFetch<Q: WorldQuery>(Q::Fetch);
-impl<Q: WorldQuery> Clone for ThreadSafeFetch<Q> {
+struct ThreadSafeFetch<Q: QueryData>(Q::Fetch);
+impl<Q: QueryData> Clone for ThreadSafeFetch<Q> {
     #[inline(always)]
     fn clone(&self) -> Self {
         ThreadSafeFetch(self.0)
     }
 }
 
-unsafe impl<Q: WorldQuery> Send for ThreadSafeFetch<Q> {}
-unsafe impl<Q: WorldQuery> Sync for ThreadSafeFetch<Q> {}
+unsafe impl<Q: QueryData> Send for ThreadSafeFetch<Q> {}
+unsafe impl<Q: QueryData> Sync for ThreadSafeFetch<Q> {}
 
-impl<Q: WorldQuery> ThreadSafeFetch<Q> {
+impl<Q: QueryData> ThreadSafeFetch<Q> {
     #[inline(always)]
     unsafe fn fetch_read_only<'w>(&self, index: usize) -> Q::ReadOnlyItem<'w> {
         unsafe { Q::fetch_read_only(self.0, index) }
@@ -63,28 +79,29 @@ impl<Q: WorldQuery> ThreadSafeFetch<Q> {
     }
 }
 
-pub struct QueryArchetypeView<'a, 'w, Q: WorldQuery, I> {
+pub struct QueryArchetypeView<'a, Q: QueryData, I> {
     pub(crate) indices: &'a [usize],
     pub(super) fetch: Q::Fetch,
-    _marker: std::marker::PhantomData<&'w I>,
+    _marker: std::marker::PhantomData<I>,
 }
 
-impl<'a, 'w, Q: WorldQuery, T> QueryArchetypeView<'a, 'w, Q, T> {
+impl<'w, Q: QueryData, T> QueryArchetypeView<'w, Q, T> {
     #[inline(always)]
     pub fn len(&self) -> usize {
         self.indices.len()
     }
 }
 
-impl<'a, 'w, Q: WorldQuery, T: Sync> QueryArchetypeView<'a, 'w, Q, T> {
-    pub fn iter(&self) -> impl Iterator<Item = Q::ReadOnlyItem<'w>> + '_ {
+impl<'a, Q: QueryData, T: Sync> QueryArchetypeView<'a, Q, T> {
+    pub fn iter<'b>(&'b self) -> impl Iterator<Item = Q::ReadOnlyItem<'b>> {
         self.indices
             .iter()
             .map(move |idx| unsafe { Q::fetch_read_only(self.fetch, *idx) })
     }
-    pub fn par_iter(&self) -> impl IndexedParallelIterator<Item = Q::ReadOnlyItem<'w>> + '_
+
+    pub fn par_iter<'b>(&'b self) -> impl IndexedParallelIterator<Item = Q::ReadOnlyItem<'b>>
     where
-        Q::ReadOnlyItem<'w>: Send,
+        Q::ReadOnlyItem<'b>: Send,
     {
         let safe_fetch = ThreadSafeFetch::<Q>(self.fetch);
 
@@ -92,12 +109,13 @@ impl<'a, 'w, Q: WorldQuery, T: Sync> QueryArchetypeView<'a, 'w, Q, T> {
             .into_par_iter()
             .map(move |i| unsafe { safe_fetch.fetch_read_only(*i) })
     }
-    pub fn par_chunks(
-        &self,
+
+    pub fn par_chunks<'b>(
+        &'b self,
         chunk_size: usize,
-    ) -> impl IndexedParallelIterator<Item = QuerySubChunk<'_, 'w, Q, ReadOnly>>
+    ) -> impl IndexedParallelIterator<Item = QuerySubChunk<'b, Q, ReadOnly>>
     where
-        Q::ReadOnlyItem<'w>: Send,
+        Q::ReadOnlyItem<'b>: Send,
     {
         assert!(chunk_size > 0, "Chunk size must be greater than zero");
         let indices_slice = self.indices;
@@ -118,27 +136,29 @@ impl<'a, 'w, Q: WorldQuery, T: Sync> QueryArchetypeView<'a, 'w, Q, T> {
     }
 }
 
-impl<'a, 'w, Q: WorldQuery> QueryArchetypeView<'a, 'w, Q, Mutable> {
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = Q::Item<'w>> + '_ {
+impl<'a, Q: QueryData> QueryArchetypeView<'a, Q, Mutable> {
+    pub fn iter_mut<'b>(&'b mut self) -> impl Iterator<Item = Q::Item<'b>> {
         self.indices
             .iter()
             .map(move |idx| unsafe { Q::fetch_mut(self.fetch, *idx) })
     }
-    pub fn par_iter_mut(&mut self) -> impl IndexedParallelIterator<Item = Q::Item<'w>> + '_
+
+    pub fn par_iter_mut<'b>(&'b mut self) -> impl IndexedParallelIterator<Item = Q::Item<'b>>
     where
-        Q::Item<'w>: Send,
+        Q::Item<'b>: Send,
     {
         let safe_fetch = ThreadSafeFetch::<Q>(self.fetch);
         self.indices
             .into_par_iter()
             .map(move |i| unsafe { safe_fetch.fetch_mut(*i) })
     }
-    pub fn par_chunks_mut(
-        &mut self,
+
+    pub fn par_chunks_mut<'b>(
+        &'b mut self,
         chunk_size: usize,
-    ) -> impl IndexedParallelIterator<Item = QuerySubChunk<'_, 'w, Q, Mutable>>
+    ) -> impl IndexedParallelIterator<Item = QuerySubChunk<'b, Q, Mutable>>
     where
-        Q::Item<'w>: Send,
+        Q::Item<'b>: Send,
     {
         assert!(chunk_size > 0, "Chunk size must be greater than zero");
 
@@ -162,16 +182,16 @@ impl<'a, 'w, Q: WorldQuery> QueryArchetypeView<'a, 'w, Q, Mutable> {
     }
 }
 
-pub struct Query<Q: WorldQuery, F: Filter = EmptyFilter> {
+pub struct Query<'q, Q: QueryData, F: QueryFilter = EmptyQueryFilter> {
     pub(crate) matching_archetypes: Vec<Option<*const Archetype>>,
     pub(crate) cached_fetches: Vec<Option<Q::Fetch>>,
     pub(crate) cached_indices: Vec<Vec<usize>>,
-    pub(crate) _marker: std::marker::PhantomData<(Q, F)>,
+    pub(crate) _marker: std::marker::PhantomData<(&'q (), Q, F)>,
 }
-unsafe impl<Q: WorldQuery, F: Filter> Send for Query<Q, F> {}
-unsafe impl<Q: WorldQuery, F: Filter> Sync for Query<Q, F> {}
+unsafe impl<'q, Q: QueryData, F: QueryFilter> Send for Query<'q, Q, F> {}
+unsafe impl<'q, Q: QueryData, F: QueryFilter> Sync for Query<'q, Q, F> {}
 
-impl<'w, Q: WorldQuery + 'w, F: Filter> Query<Q, F> {
+impl<'q, 'w, Q: QueryData + 'w, F: QueryFilter> Query<'q, Q, F> {
     pub(crate) fn new(world: &mut World, system_data: &mut FunctionData) -> Self {
         let mut matching_archetypes = vec![None; world.archetypes_manager.archetypes.len()];
         let mut cached_fetches = vec![None; world.archetypes_manager.archetypes.len()];
@@ -201,9 +221,7 @@ impl<'w, Q: WorldQuery + 'w, F: Filter> Query<Q, F> {
         }
     }
 
-    pub fn iter<'a>(
-        &'a self,
-    ) -> impl Iterator<Item = QueryArchetypeView<'a, 'w, Q, ReadOnly>> + 'a {
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item = QueryArchetypeView<'a, Q, ReadOnly>> {
         self.matching_archetypes
             .iter()
             .flatten()
@@ -219,9 +237,7 @@ impl<'w, Q: WorldQuery + 'w, F: Filter> Query<Q, F> {
             })
     }
 
-    pub fn iter_mut<'a>(
-        &'a mut self,
-    ) -> impl Iterator<Item = QueryArchetypeView<'a, 'w, Q, Mutable>> + 'a {
+    pub fn iter_mut<'a>(&'a mut self) -> impl Iterator<Item = QueryArchetypeView<'a, Q, Mutable>> {
         let cached_fetches = &self.cached_fetches;
         let cached_indices = &self.cached_indices;
 
@@ -239,7 +255,7 @@ impl<'w, Q: WorldQuery + 'w, F: Filter> Query<Q, F> {
                 }
             })
     }
-    pub fn get(&self, entity: &Entity) -> Option<Q::ReadOnlyItem<'_>> {
+    pub fn get(&self, entity: &Entity) -> Option<Q::ReadOnlyItem<'q>> {
         unsafe {
             let cell_ptr = REGISTRY.get_ptr(entity.registry_index as usize);
 
@@ -251,7 +267,7 @@ impl<'w, Q: WorldQuery + 'w, F: Filter> Query<Q, F> {
         }
     }
 
-    pub fn get_mut(&mut self, entity: &Entity) -> Option<Q::Item<'_>> {
+    pub fn get_mut(&mut self, entity: &Entity) -> Option<Q::Item<'q>> {
         unsafe {
             let cell_ptr = REGISTRY.get_ptr(entity.registry_index as usize);
 
@@ -261,5 +277,18 @@ impl<'w, Q: WorldQuery + 'w, F: Filter> Query<Q, F> {
             let fetch = self.cached_fetches[arch_id.id() as usize]?;
             Some(Q::fetch_mut(fetch, row_idx as usize))
         }
+    }
+}
+
+impl<'q, Q: QueryData + 'static, F: QueryFilter + 'static> SystemParam for Query<'q, Q, F> {
+    fn get_access() -> ParamAccess {
+        let mut access = ParamAccess::default();
+        Q::collect_access(&mut access.reads, &mut access.writes);
+        F::collect_filter(&mut access.with_filters, &mut access.without_filters);
+        access
+    }
+
+    fn extract(world: &mut World, system_data: &mut FunctionData) -> Self {
+        Query::<Q, F>::new(world, system_data)
     }
 }

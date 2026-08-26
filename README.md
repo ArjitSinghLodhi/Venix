@@ -11,6 +11,7 @@ A deterministic, high-concurrency Entity Component System written in Rust. Venix
 * **Work-Stealing Concurrency:** Native integration with a high-performance Rayon worker pool enables parallel processing over archetype data batches without runtime dispatch overhead.
 * **Static Access Routing:** Query parameter bounds constraints (With, Without, Changed) to resolve structural archetype filtering paths instantly before execution loops initiate.
 * **Linear Synchronized Commits:** Mutative operations—including lifecycle spawning, structural insertions, and removals—are deferred into thread-local ParallelCommands buffers. Modifications are flushed linearly at system boundary synchronization checkpoints to maintain reference stability.
+* **Events:** EventWriter and EventReader are both supported they use the same lifecycle logic as Changed detection.
 
 ---
 

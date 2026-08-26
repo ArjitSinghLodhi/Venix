@@ -1,5 +1,5 @@
 use std::{
-    any::TypeId,
+    any::{TypeId, type_name},
     collections::VecDeque,
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -9,11 +9,13 @@ use fxhash::{FxBuildHasher, FxHashMap, FxHashSet};
 use crate::{
     app::plugin::PluginsBuildAll,
     commands::bundle::ComponentBundle,
+    events::{EventQueue, register_event},
+    extensions::SystemExt,
     schedule::{
         schedule::{IntoScheduleId, Schedule, ScheduleId, ScheduleLabel, SchedulePlace},
         schedules_list::Startup,
     },
-    system::validation::{IntoSystemConfigs, System},
+    system::validation::{FunctionGenerationData, IntoSystemConfigs, System},
     world::storage::World,
 };
 
@@ -149,6 +151,17 @@ impl App {
         self
     }
 
+    pub fn init_event<T: 'static>(&mut self) -> &mut Self {
+        self.configuration.not_ready();
+        if let None = self.world.get_resource_opt::<EventQueue<T>>() {
+            self.world.insert_resource(EventQueue::<T>::new());
+        } else {
+            panic!("Event: {} Already initialized", type_name::<T>())
+        }
+        register_event::<T>();
+        self
+    }
+
     pub fn build(&mut self) {
         self.configuration.not_ready();
         self.build_everything();
@@ -171,7 +184,7 @@ impl App {
         for schedule in self.schedules.iter_mut() {
             schedule.run(&mut self.world);
         }
-        self.clear_changed_tracker();
+        self.end_of_frame_sync();
     }
 
     pub fn run(&mut self) {
@@ -212,8 +225,8 @@ impl App {
         self.world.apply_commands();
     }
 
-    pub fn clear_changed_tracker(&mut self) {
-        self.world.clear_changed_tracker();
+    pub fn end_of_frame_sync(&mut self) {
+        self.world.end_of_frame_sync();
     }
 }
 
@@ -268,6 +281,19 @@ impl App {
                 .systems
                 .extend(system_block.systems.into_iter());
         }
+        let mut running_system_offset: u32 = 0;
+
+        for target_schedule in &mut self.schedules {
+            for (system_idx, sys) in target_schedule.systems.iter_mut().enumerate() {
+                let absolute_system_id = running_system_offset + (system_idx as u32);
+
+                let data =
+                    sys.get_or_init_mut::<FunctionGenerationData>(|| FunctionGenerationData::new());
+                data.system_id = absolute_system_id;
+            }
+            running_system_offset += target_schedule.systems.len() as u32;
+        }
+
         self.configuration.systems_added = true;
     }
 

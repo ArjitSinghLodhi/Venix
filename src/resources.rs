@@ -1,12 +1,15 @@
-use crate::world::storage::World;
+use crate::{
+    extensions::{FunctionData, ParamAccess, SystemParam},
+    world::storage::World,
+};
 use std::marker::PhantomData;
 
-pub struct Res<T: 'static> {
+pub struct Res<'w, T: 'static> {
     ptr: *const T,
-    _marker: PhantomData<T>,
+    _marker: PhantomData<(&'w (), T)>,
 }
 
-impl<T: 'static> Res<T> {
+impl<'w, T: 'static> Res<'w, T> {
     pub(crate) unsafe fn new(world: &World) -> Self {
         let res = world.get_resource::<T>();
         Self {
@@ -20,19 +23,36 @@ impl<T: 'static> Res<T> {
     }
 }
 
-impl<T: 'static> std::ops::Deref for Res<T> {
+impl<'w, T: 'static> std::ops::Deref for Res<'w, T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
         self.get()
     }
 }
 
-pub struct ResMut<T: 'static> {
-    ptr: *mut T,
-    _marker: PhantomData<T>,
+unsafe impl<'w, T: Send> Send for Res<'w, T> {}
+unsafe impl<'w, T: Sync> Sync for Res<'w, T> {}
+
+impl<'w, T: 'static> SystemParam for Res<'w, T> {
+    fn get_access() -> ParamAccess {
+        let mut access = ParamAccess {
+            ..Default::default()
+        };
+        access.res_reads.push(std::any::TypeId::of::<T>());
+        access
+    }
+
+    fn extract(world: &mut World, _system_data: &mut FunctionData) -> Self {
+        unsafe { Self::new(world) }
+    }
 }
 
-impl<T: 'static> ResMut<T> {
+pub struct ResMut<'w, T: 'static> {
+    ptr: *mut T,
+    _marker: PhantomData<(&'w (), T)>,
+}
+
+impl<'w, T: 'static> ResMut<'w, T> {
     pub(crate) unsafe fn new(world: &mut World) -> Self {
         let res = world.get_resource_mut::<T>();
         Self {
@@ -46,15 +66,32 @@ impl<T: 'static> ResMut<T> {
     }
 }
 
-impl<T: 'static> std::ops::Deref for ResMut<T> {
+impl<'w, T: 'static> std::ops::Deref for ResMut<'w, T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
         unsafe { &*self.ptr }
     }
 }
 
-impl<T: 'static> std::ops::DerefMut for ResMut<T> {
+impl<'w, T: 'static> std::ops::DerefMut for ResMut<'w, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.get_mut()
+    }
+}
+
+unsafe impl<'w, T: Send> Send for ResMut<'w, T> {}
+unsafe impl<'w, T: Sync> Sync for ResMut<'w, T> {}
+
+impl<'w, T: 'static> SystemParam for ResMut<'w, T> {
+    fn get_access() -> ParamAccess {
+        let mut access = ParamAccess {
+            ..Default::default()
+        };
+        access.res_writes.push(std::any::TypeId::of::<T>());
+        access
+    }
+
+    fn extract(world: &mut World, _system_data: &mut FunctionData) -> Self {
+        unsafe { Self::new(world) }
     }
 }

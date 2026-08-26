@@ -15,29 +15,29 @@ unsafe impl Sync for UnsafeGlobalRegistry {}
 
 impl UnsafeGlobalRegistry {
     #[inline(always)]
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         unsafe { (*self.0.get()).len() }
     }
 
     #[inline(always)]
-    pub fn push(&self, cell: RegistryCell) {
+    pub(crate) fn push(&self, cell: RegistryCell) {
         unsafe {
             (*self.0.get()).push(cell);
         }
     }
 
     #[inline(always)]
-    pub unsafe fn get_ptr(&self, index: usize) -> *const RegistryCell {
+    pub(crate) unsafe fn get_ptr(&self, index: usize) -> *const RegistryCell {
         unsafe { (*self.0.get()).as_ptr().add(index) }
     }
 
     #[inline(always)]
-    pub unsafe fn get_mut_ptr(&self, index: usize) -> *mut RegistryCell {
+    pub(crate) unsafe fn get_mut_ptr(&self, index: usize) -> *mut RegistryCell {
         unsafe { (*self.0.get()).as_mut_ptr().add(index) }
     }
 
     #[inline(always)]
-    pub unsafe fn decrement_handle(&self, index: usize) {
+    pub(crate) unsafe fn decrement_handle(&self, index: usize) {
         let cell_ptr = unsafe { self.get_mut_ptr(index) };
         unsafe {
             (*cell_ptr).handle_count.fetch_sub(1, Ordering::Relaxed);

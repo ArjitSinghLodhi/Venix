@@ -6,15 +6,18 @@ use crate::{
     world::archetypes::Archetype,
 };
 
-pub trait StructuralFilter: Filter {}
+pub trait StructuralQueryFilter: QueryFilter {}
 
-impl<T: 'static> StructuralFilter for With<T> {}
-impl<T: 'static> StructuralFilter for Without<T> {}
-impl<A: Filter + StructuralFilter, B: Filter + StructuralFilter> StructuralFilter for Or<A, B> {}
-impl<T: Filter + StructuralFilter> StructuralFilter for Not<T> {}
-impl<T: Filter> StructuralFilter for AnyOf<T> where AnyOf<T>: Filter {}
+impl<T: 'static> StructuralQueryFilter for With<T> {}
+impl<T: 'static> StructuralQueryFilter for Without<T> {}
+impl<A: QueryFilter + StructuralQueryFilter, B: QueryFilter + StructuralQueryFilter>
+    StructuralQueryFilter for Or<A, B>
+{
+}
+impl<T: QueryFilter + StructuralQueryFilter> StructuralQueryFilter for Not<T> {}
+impl<T: QueryFilter> StructuralQueryFilter for AnyOf<T> where AnyOf<T>: QueryFilter {}
 
-pub trait Filter {
+pub trait QueryFilter {
     fn matches(types: &AccessHashSet<TypeId>) -> bool;
     fn matches_negated(types: &AccessHashSet<TypeId>) -> bool {
         !Self::matches(types)
@@ -32,7 +35,7 @@ pub trait Filter {
 }
 
 pub struct With<T>(std::marker::PhantomData<T>);
-impl<T: 'static> Filter for With<T> {
+impl<T: 'static> QueryFilter for With<T> {
     fn matches(types: &AccessHashSet<TypeId>) -> bool {
         types.contains(&TypeId::of::<T>())
     }
@@ -41,7 +44,7 @@ impl<T: 'static> Filter for With<T> {
     }
 }
 pub struct Without<T>(std::marker::PhantomData<T>);
-impl<T: 'static> Filter for Without<T> {
+impl<T: 'static> QueryFilter for Without<T> {
     fn matches(types: &AccessHashSet<TypeId>) -> bool {
         !types.contains(&TypeId::of::<T>())
     }
@@ -49,17 +52,17 @@ impl<T: 'static> Filter for Without<T> {
         withouts.push(std::any::TypeId::of::<T>());
     }
 }
-pub struct EmptyFilter;
-impl Filter for EmptyFilter {
+pub struct EmptyQueryFilter;
+impl QueryFilter for EmptyQueryFilter {
     fn matches(_: &AccessHashSet<TypeId>) -> bool {
         true
     }
     fn collect_filter(_withs: &mut AccessVec<TypeId>, _withouts: &mut AccessVec<TypeId>) {}
 }
 
-macro_rules! impl_filter_tuple {
+macro_rules! impl_QueryFilter_tuple {
     ($($name:ident),*) => {
-        impl<$($name: Filter),*> Filter for ($($name,)*) {
+        impl<$($name: QueryFilter),*> QueryFilter for ($($name,)*) {
             #[inline]
             fn matches(types: &AccessHashSet<TypeId>) -> bool {
                 $($name::matches(types))&&*
@@ -83,20 +86,20 @@ macro_rules! impl_filter_tuple {
                 )*
             }
         }
-        impl<$($name: Filter + StructuralFilter),*> StructuralFilter for ($($name,)*){}
+        impl<$($name: QueryFilter + StructuralQueryFilter),*> StructuralQueryFilter for ($($name,)*){}
     };
 }
 
-impl_filter_tuple!(A);
-impl_filter_tuple!(A, B);
-impl_filter_tuple!(A, B, C);
-impl_filter_tuple!(A, B, C, D);
-impl_filter_tuple!(A, B, C, D, E);
-impl_filter_tuple!(A, B, C, D, E, F);
-impl_filter_tuple!(A, B, C, D, E, F, G);
-impl_filter_tuple!(A, B, C, D, E, F, G, H);
-impl_filter_tuple!(A, B, C, D, E, F, G, H, I);
-impl_filter_tuple!(A, B, C, D, E, F, G, H, I, J);
-impl_filter_tuple!(A, B, C, D, E, F, G, H, I, J, K);
-impl_filter_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
-impl_filter_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M);
+impl_QueryFilter_tuple!(A);
+impl_QueryFilter_tuple!(A, B);
+impl_QueryFilter_tuple!(A, B, C);
+impl_QueryFilter_tuple!(A, B, C, D);
+impl_QueryFilter_tuple!(A, B, C, D, E);
+impl_QueryFilter_tuple!(A, B, C, D, E, F);
+impl_QueryFilter_tuple!(A, B, C, D, E, F, G);
+impl_QueryFilter_tuple!(A, B, C, D, E, F, G, H);
+impl_QueryFilter_tuple!(A, B, C, D, E, F, G, H, I);
+impl_QueryFilter_tuple!(A, B, C, D, E, F, G, H, I, J);
+impl_QueryFilter_tuple!(A, B, C, D, E, F, G, H, I, J, K);
+impl_QueryFilter_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
+impl_QueryFilter_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M);

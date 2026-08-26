@@ -8,13 +8,38 @@ use std::{
 };
 
 use crate::{
-    commands::{bundle::ComponentBundle, commands::CommandBuffer},
+    commands::{CommandBuffer, bundle::ComponentBundle},
+    events::TRACKED_EVENTS,
     query::changed::TRACKED_COMPONENTS,
     registry::REGISTRY,
     world::archetypes::{ArchetypeId, ArchetypeManager},
 };
 
-pub(crate) static CURRENT_FRAME_GENERATION: AtomicU8 = AtomicU8::new(1);
+pub struct GenerationRing;
+static GLOBAL_GEN: AtomicU8 = AtomicU8::new(1);
+
+impl GenerationRing {
+    #[inline]
+    pub fn current() -> u8 {
+        GLOBAL_GEN.load(Ordering::Relaxed)
+    }
+    #[inline]
+    pub fn advance() -> u8 {
+        let current = Self::current();
+        let next = if current == 4 { 1 } else { current + 1 };
+        GLOBAL_GEN.store(next, Ordering::Relaxed);
+        next
+    }
+    #[inline]
+    pub fn previous(current: u8) -> u8 {
+        if current == 1 { 4 } else { current - 1 }
+    }
+    #[inline]
+    pub fn stale_threshold(current: u8) -> u8 {
+        Self::previous(Self::previous(current))
+    }
+}
+
 pub struct World {
     pub(crate) archetypes_manager: ArchetypeManager,
     pub(crate) resources:
@@ -36,7 +61,9 @@ impl World {
         self.get_or_create_archetype_from_generic::<T>();
     }
 
-    pub(crate) fn get_or_create_archetype_from_generic<T: ComponentBundle>(&mut self) -> ArchetypeId {
+    pub(crate) fn get_or_create_archetype_from_generic<T: ComponentBundle>(
+        &mut self,
+    ) -> ArchetypeId {
         self.archetypes_manager.get_or_create_from_generic::<T>()
     }
 
@@ -119,10 +146,13 @@ impl World {
         self.commands = commands;
     }
 
-    pub fn clear_changed_tracker(&mut self) {
-        let current = CURRENT_FRAME_GENERATION.load(Ordering::Relaxed);
-        let next = if current == 1 { 2 } else { 1 };
-        CURRENT_FRAME_GENERATION.store(next, Ordering::Relaxed);
+    pub(crate) fn end_of_frame_sync(&mut self) {
+        GenerationRing::advance();
+        self.clear_changed_tracker();
+        self.clear_events();
+    }
+
+    fn clear_changed_tracker(&mut self) {
         let tracked = TRACKED_COMPONENTS.read().unwrap();
 
         for archetype in self.archetypes_manager.archetypes.values_mut() {
@@ -136,6 +166,17 @@ impl World {
                     }
                 }
             }
+        }
+    }
+
+    fn clear_events(&mut self) {
+        let tracked_events = TRACKED_EVENTS.read().unwrap();
+        for meta in tracked_events.iter() {
+            let unsafecell = self
+                .resources
+                .get_mut(&meta.event_id)
+                .expect("Registered event Not initialized somehow? maybe removed");
+            (meta.clear_events)(unsafecell);
         }
     }
 }

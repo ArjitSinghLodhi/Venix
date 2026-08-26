@@ -1,5 +1,5 @@
 use crate::{
-    query::filter::{Filter, StructuralFilter},
+    query::filter::{QueryFilter, StructuralQueryFilter},
     system::validation::{AccessHashSet, AccessVec},
 };
 use std::any::TypeId;
@@ -10,7 +10,7 @@ pub struct AnyOf<T>(std::marker::PhantomData<T>);
 
 pub struct Not<F>(std::marker::PhantomData<F>);
 
-impl<F: Filter + StructuralFilter> Filter for Not<F> {
+impl<F: QueryFilter + StructuralQueryFilter> QueryFilter for Not<F> {
     #[inline]
     fn matches(types: &AccessHashSet<TypeId>) -> bool {
         F::matches_negated(types)
@@ -22,7 +22,9 @@ impl<F: Filter + StructuralFilter> Filter for Not<F> {
     }
 }
 
-impl<A: Filter + StructuralFilter, B: Filter + StructuralFilter> Filter for Or<A, B> {
+impl<A: QueryFilter + StructuralQueryFilter, B: QueryFilter + StructuralQueryFilter> QueryFilter
+    for Or<A, B>
+{
     #[inline]
     fn matches(types: &AccessHashSet<TypeId>) -> bool {
         A::matches(types) || B::matches(types)
@@ -37,7 +39,7 @@ impl<A: Filter + StructuralFilter, B: Filter + StructuralFilter> Filter for Or<A
 
 macro_rules! impl_any_of_tuple {
     ($($name:ident),*) => {
-        impl<$($name: Filter + StructuralFilter),*> Filter for AnyOf<($($name,)*)> {
+        impl<$($name: QueryFilter + StructuralQueryFilter),*> QueryFilter for AnyOf<($($name,)*)> {
             #[inline]
             fn matches(types: &AccessHashSet<TypeId>) -> bool {
                 $($name::matches(types))||*

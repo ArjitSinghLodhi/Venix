@@ -172,6 +172,76 @@ impl<T: ComponentBundle> WorldCommand for AddComponentsCommand<T> {
     }
 }
 
+pub struct InsertComponentsCommand<T: ComponentBundle> {
+    pub entity: Entity,
+    pub components: T,
+}
+
+impl<T: ComponentBundle> WorldCommand for InsertComponentsCommand<T> {
+    fn apply(self, world: &mut World) {
+        let target_registry_idx = self.entity.registry_index as usize;
+        let (old_arch_id, old_idx) = get_registry_location(target_registry_idx);
+        let incoming_ids = T::get_type_ids();
+
+        let new_arch_id = if let Some(id) = world
+            .archetypes_manager
+            .find_target_id_for_addition(old_arch_id, incoming_ids)
+        {
+            id
+        } else {
+            create_addition_archetype::<T>(world, old_arch_id, incoming_ids)
+        };
+
+        if old_arch_id == new_arch_id {
+            let arch = world
+                .archetypes_manager
+                .get_mut(old_arch_id)
+                .expect("Venix Engine Fatal: Entity registry pointed to an untracked Archetype ID");
+
+            unsafe {
+                self.components.insert_to_archetype(arch, old_idx as usize);
+            }
+            return;
+        }
+
+        unsafe {
+            let (old_arch, new_arch) = get_double_archetypes(world, old_arch_id, new_arch_id);
+            let new_dense_idx = new_arch.entities.len() as u32;
+
+            {
+                let new_cols = &mut *new_arch.columns.get();
+                let old_cols = &mut *old_arch.columns.get();
+
+                if new_cols.is_empty() {
+                    T::create_empty_columns(new_cols);
+                    clone_existing_columns(old_cols, new_cols);
+                    initialize_missing_archetype_markers(&new_arch.types, new_cols);
+                }
+
+                move_matching_columns(old_cols, new_cols, old_idx as usize);
+            }
+            self.components
+                .insert_to_archetype(new_arch, new_dense_idx as usize);
+
+            let fresh_old_cols = &mut *old_arch.columns.get();
+            let fresh_new_cols = &mut *new_arch.columns.get();
+
+            migrate_addition_markers(
+                &old_arch.types,
+                old_idx as usize,
+                incoming_ids,
+                fresh_old_cols,
+                fresh_new_cols,
+            );
+
+            swap_remove_entity_registry_update(old_arch, old_idx);
+            let entity_handle = old_arch.entities.swap_remove(old_idx as usize);
+            new_arch.entities.push(entity_handle);
+            update_registry_cell(target_registry_idx, new_arch_id, new_dense_idx);
+        }
+    }
+}
+
 pub(crate) struct RemoveComponentsCommand<T: ComponentBundle> {
     pub(crate) entity: Entity,
     pub(crate) _marker: std::marker::PhantomData<T>,
@@ -529,18 +599,19 @@ impl Commands<'_> {
         }
     }
 
-    pub fn add_components<B: ComponentBundle>(&mut self, entity: Entity, components: B) {
-        self.push(AddComponentsCommand {
-            entity,
-            components,
-        });
+    pub fn add_components<C: ComponentBundle>(&mut self, entity: Entity, components: C) {
+        self.push(AddComponentsCommand { entity, components });
     }
 
-    pub fn remove_components<T: ComponentBundle>(&mut self, entity: Entity) {
-        self.push(RemoveComponentsCommand::<T> {
+    pub fn remove_components<C: ComponentBundle>(&mut self, entity: Entity) {
+        self.push(RemoveComponentsCommand::<C> {
             entity,
             _marker: std::marker::PhantomData,
         });
+    }
+
+    pub fn insert_components<C: ComponentBundle>(&mut self, entity: Entity, components: C) {
+        self.push(InsertComponentsCommand { entity, components });
     }
 
     pub fn despawn_iter(&self) -> std::collections::hash_set::Iter<'_, DespawnCommand> {

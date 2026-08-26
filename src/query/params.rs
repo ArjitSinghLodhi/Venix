@@ -1,30 +1,18 @@
-use std::{any::TypeId, sync::atomic::Ordering};
+use std::any::TypeId;
 
 use fxhash::FxHashSet;
 
 use crate::{
     entity::Entity,
-    query::changed::{ChangedMarker, Mut},
-    system::validation::{AccessVec, FunctionData},
-    world::{archetypes::Archetype, storage::CURRENT_FRAME_GENERATION},
+    query::{
+        changed::{ChangedMarker, Mut},
+        query::QueryData,
+    },
+    system::validation::{AccessVec, FunctionData, FunctionGenerationData},
+    world::{archetypes::Archetype, storage::GenerationRing},
 };
 
-pub trait WorldQuery {
-    type Item<'w>;
-    type ReadOnlyItem<'w>;
-    type Fetch: Copy;
-
-    fn matches(types: &FxHashSet<TypeId>) -> bool;
-    unsafe fn init_fetch(archetype: &Archetype, systems_data: &mut FunctionData) -> Self::Fetch;
-    fn collect_access(
-        reads: &mut AccessVec<std::any::TypeId>,
-        writes: &mut AccessVec<std::any::TypeId>,
-    );
-    unsafe fn fetch_mut<'w>(fetch: Self::Fetch, index: usize) -> Self::Item<'w>;
-    unsafe fn fetch_read_only<'w>(fetch: Self::Fetch, index: usize) -> Self::ReadOnlyItem<'w>;
-}
-
-impl<T: 'static> WorldQuery for &T {
+impl<T: 'static> QueryData for &T {
     type Item<'w> = &'w T;
     type ReadOnlyItem<'w> = &'w T;
     type Fetch = *const T;
@@ -49,21 +37,26 @@ impl<T: 'static> WorldQuery for &T {
     }
 }
 
-impl<T: 'static> WorldQuery for &mut T {
+impl<T: 'static> QueryData for &mut T {
     type Item<'w> = Mut<'w, T>;
     type ReadOnlyItem<'w> = &'w T;
-    type Fetch = (*mut T, *mut ChangedMarker<T>, u8, bool);
+    type Fetch = (*mut T, *mut ChangedMarker<T>, u8, u32, bool);
 
     fn matches(types: &FxHashSet<TypeId>) -> bool {
         types.contains(&TypeId::of::<T>())
     }
 
-    unsafe fn init_fetch(archetype: &Archetype, _: &mut FunctionData) -> Self::Fetch {
+    unsafe fn init_fetch(archetype: &Archetype, data: &mut FunctionData) -> Self::Fetch {
         unsafe {
             let data_ptr = (*archetype.fetch_column_raw::<T>()).as_mut_ptr();
             let columns = &mut *archetype.columns.get();
             let marker_id = TypeId::of::<ChangedMarker<T>>();
-            let current_generation = CURRENT_FRAME_GENERATION.load(Ordering::Relaxed);
+            let generation_data = data
+                .get_data::<FunctionGenerationData>()
+                .expect("Missing FunctionGenerationData on mutable component query fetch");
+
+            let system_id = generation_data.system_id;
+            let current_generation = GenerationRing::current();
 
             if let Some(column) = columns.get_mut(&marker_id) {
                 let vec_ptr = column
@@ -72,9 +65,21 @@ impl<T: 'static> WorldQuery for &mut T {
                     .downcast_mut::<Vec<ChangedMarker<T>>>()
                     .unwrap();
 
-                (data_ptr, vec_ptr.as_mut_ptr(), current_generation, true)
+                (
+                    data_ptr,
+                    vec_ptr.as_mut_ptr(),
+                    current_generation,
+                    system_id,
+                    true,
+                )
             } else {
-                (data_ptr, std::ptr::null_mut(), current_generation, false)
+                (
+                    data_ptr,
+                    std::ptr::null_mut(),
+                    current_generation,
+                    system_id,
+                    false,
+                )
             }
         }
     }
@@ -84,9 +89,10 @@ impl<T: 'static> WorldQuery for &mut T {
         unsafe {
             Mut {
                 value: fetch.0.add(index),
-                marker: fetch.1.wrapping_add(index),
+                marker: fetch.1.add(index),
                 generation: fetch.2,
-                should_modify: fetch.3,
+                system_id: fetch.3,
+                should_modify: fetch.4,
                 _marker: std::marker::PhantomData,
             }
         }
@@ -102,7 +108,7 @@ impl<T: 'static> WorldQuery for &mut T {
     }
 }
 
-impl WorldQuery for Entity {
+impl QueryData for Entity {
     type Item<'w> = &'w Entity;
     type ReadOnlyItem<'w> = &'w Entity;
     type Fetch = *const Entity;
@@ -122,7 +128,7 @@ impl WorldQuery for Entity {
     }
 }
 
-impl<T: 'static> WorldQuery for Option<&T> {
+impl<T: 'static> QueryData for Option<&T> {
     type Item<'w> = Option<&'w T>;
     type ReadOnlyItem<'w> = Option<&'w T>;
     type Fetch = Option<*const T>;
@@ -159,10 +165,10 @@ impl<T: 'static> WorldQuery for Option<&T> {
     }
 }
 
-impl<T: 'static> WorldQuery for Option<&mut T> {
+impl<T: 'static> QueryData for Option<&mut T> {
     type Item<'w> = Option<Mut<'w, T>>;
     type ReadOnlyItem<'w> = Option<&'w T>;
-    type Fetch = (Option<*mut T>, *mut ChangedMarker<T>, u8, bool);
+    type Fetch = (Option<*mut T>, *mut ChangedMarker<T>, u8, u32, bool);
 
     fn matches(_types: &FxHashSet<TypeId>) -> bool {
         true
@@ -173,13 +179,17 @@ impl<T: 'static> WorldQuery for Option<&mut T> {
         writes.push(TypeId::of::<ChangedMarker<T>>());
     }
 
-    unsafe fn init_fetch(archetype: &Archetype, _: &mut FunctionData) -> Self::Fetch {
+    unsafe fn init_fetch(archetype: &Archetype, data: &mut FunctionData) -> Self::Fetch {
         unsafe {
             let columns = &mut *archetype.columns.get();
             let component_id = TypeId::of::<T>();
             let marker_id = TypeId::of::<ChangedMarker<T>>();
+            let generation_data = data
+                .get_data::<FunctionGenerationData>()
+                .expect("Missing FunctionGenerationData on optional mutable component query fetch");
 
-            let current_generation = CURRENT_FRAME_GENERATION.load(Ordering::Relaxed);
+            let system_id = generation_data.system_id;
+            let current_generation = GenerationRing::current();
 
             if columns.contains_key(&component_id) {
                 let data_ptr = (*archetype.fetch_column_raw::<T>()).as_mut_ptr();
@@ -195,6 +205,7 @@ impl<T: 'static> WorldQuery for Option<&mut T> {
                         Some(data_ptr),
                         vec_ptr.as_mut_ptr(),
                         current_generation,
+                        system_id,
                         true,
                     )
                 } else {
@@ -202,11 +213,18 @@ impl<T: 'static> WorldQuery for Option<&mut T> {
                         Some(data_ptr),
                         std::ptr::null_mut(),
                         current_generation,
+                        system_id,
                         false,
                     )
                 }
             } else {
-                (None, std::ptr::null_mut(), current_generation, false)
+                (
+                    None,
+                    std::ptr::null_mut(),
+                    current_generation,
+                    system_id,
+                    false,
+                )
             }
         }
     }
@@ -219,7 +237,8 @@ impl<T: 'static> WorldQuery for Option<&mut T> {
                     value: data_head.add(index),
                     marker: fetch.1.add(index),
                     generation: fetch.2,
-                    should_modify: fetch.3,
+                    system_id: fetch.3,
+                    should_modify: fetch.4,
                     _marker: std::marker::PhantomData,
                 })
             } else {
@@ -242,7 +261,7 @@ impl<T: 'static> WorldQuery for Option<&mut T> {
 
 macro_rules! impl_world_query_tuple {
     ($($name:ident -> $idx:tt),*) => {
-        impl<$($name: WorldQuery),*> WorldQuery for ($($name,)*) {
+        impl<$($name: QueryData),*> QueryData for ($($name,)*) {
             type Item<'w> = ($($name::Item<'w>,)*);
             type ReadOnlyItem<'w> = ($($name::ReadOnlyItem<'w>,)*);
             type Fetch = ($($name::Fetch,)*);

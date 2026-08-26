@@ -1,29 +1,31 @@
+use crate::system::validation::FunctionGenerationData;
 use crate::system::validation::FunctionSystem;
 use crate::system::validation::IntoSystem;
 use crate::system::validation::System;
 use crate::system::validation::SystemParam;
-use crate::world::storage::CURRENT_FRAME_GENERATION;
+use crate::world::storage::GenerationRing;
 use crate::world::storage::World;
-use std::sync::atomic::Ordering;
 macro_rules! impl_system_for_functions {
     ($($var:ident : $param:ident),*) => {
         impl<$($param,)* F> System for FunctionSystem<($($param,)*), F>
         where
             $( $param: SystemParam + 'static, )*
             F: Fn($($param),*) + 'static,
-        {
-            fn run(&mut self, world: &mut World) {
-                let system_data = &mut self.data;
-                let world_gen = CURRENT_FRAME_GENERATION.load(Ordering::Relaxed);
-                if system_data.current_run_generation != world_gen {
-                    system_data.last_run_generation = system_data.current_run_generation;
-                    system_data.current_run_generation = world_gen;
-                }
-                $(
-                    let $var = <$param>::extract(world, system_data);
-                )*
-                (self.func)($($var),*);
-            }
+         {
+    fn run(&mut self, world: &mut World) {
+        let system_data = &mut self.data;
+        let generation_data = system_data.get_data_mut::<FunctionGenerationData>().unwrap();
+        let world_gen = GenerationRing::current();
+        if generation_data.current_run_generation != world_gen {
+            generation_data.last_run_generation = generation_data.current_run_generation;
+            generation_data.current_run_generation = world_gen;
+        }
+
+        $(
+            let $var = <$param>::extract(world, system_data);
+        )*
+        (self.func)($($var),*);
+    }
         }
 
         impl<$($param,)* F> IntoSystem<($($param,)*)> for F
@@ -63,7 +65,7 @@ macro_rules! impl_system_for_functions {
 
                             if !is_disjoint {
                                 panic!(
-                                    "❌ ECS SYSTEM ARGUMENT CONFLICT: Function '{}' contains overlapping queries that mutably borrow the same component data without disjoint filters (With/Without)!",
+                                    "❌ ECS SYSTEM ARGUMENT CONFLICT: Function '{}' contains overlapping queries that mutably borrow the same component data without disjoint QueryFilters (With/Without)!",
                                     std::any::type_name::<F>()
                                 );
                             }
@@ -80,8 +82,9 @@ macro_rules! impl_system_for_functions {
                         }
                     }
                 }
-
-                FunctionSystem::new(self)
+                let mut func = FunctionSystem::new(self);
+                func.data.insert(FunctionGenerationData::new());
+                func
             }
         }
     };

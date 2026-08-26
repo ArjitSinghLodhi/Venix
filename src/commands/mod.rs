@@ -1,4 +1,7 @@
 pub mod bundle;
 mod command_queue;
-pub mod commands;
-pub mod parallel_commands;
+mod commands;
+mod parallel_commands;
+pub(crate) use commands::CommandBuffer;
+pub use commands::{Commands, DespawnCommand};
+pub use parallel_commands::ParallelCommands;

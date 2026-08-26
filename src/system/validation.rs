@@ -1,12 +1,11 @@
-use std::{any::TypeId, hash::Hash};
-
-use fxhash::FxHashSet;
-
-use crate::{
-    query::{filter::Filter, params::WorldQuery, query::Query},
-    resources::{Res, ResMut},
-    world::storage::World,
+use std::{
+    any::{Any, TypeId},
+    hash::{BuildHasherDefault, Hash},
 };
+
+use fxhash::{FxHashMap, FxHashSet};
+
+use crate::world::storage::World;
 
 pub struct AccessHashSet<T: Eq + Hash> {
     pub(crate) set: FxHashSet<T>,
@@ -75,31 +74,149 @@ pub trait SystemParam {
     fn extract(world: &mut World, system_data: &mut FunctionData) -> Self;
 }
 
-impl<Q: WorldQuery + 'static, F: Filter + 'static> SystemParam for Query<Q, F> {
-    fn get_access() -> ParamAccess {
-        let mut access = ParamAccess::default();
-        Q::collect_access(&mut access.reads, &mut access.writes);
-        F::collect_filter(&mut access.with_filters, &mut access.without_filters);
-        access
-    }
-
-    fn extract(world: &mut World, system_data: &mut FunctionData) -> Self {
-        Query::<Q, F>::new(world, system_data)
-    }
-}
-
-pub trait System {
+pub trait System: SystemData {
     fn run(&mut self, world: &mut World);
 }
 
+pub trait SystemData {
+    fn get_raw_data(&self, id: TypeId) -> Option<&Box<dyn Any>>;
+    fn get_raw_data_mut(&mut self, id: TypeId) -> Option<&mut Box<dyn Any>>;
+    fn insert_raw_data(&mut self, id: TypeId, value: Box<dyn Any>);
+}
+
+pub trait SystemExt {
+    fn get_data<T: 'static>(&self) -> Option<&T>;
+    fn get_data_mut<T: 'static>(&mut self) -> Option<&mut T>;
+    fn insert<T: 'static>(&mut self, value: T);
+    fn get_or_init<T: 'static>(&mut self, init: fn() -> T) -> &T;
+    fn get_or_init_mut<T: 'static>(&mut self, init: fn() -> T) -> &mut T;
+}
+
+impl<S: SystemData + ?Sized> SystemExt for S {
+    fn get_data<T: 'static>(&self) -> Option<&T> {
+        self.get_raw_data(TypeId::of::<T>())
+            .and_then(|any| any.downcast_ref::<T>())
+    }
+
+    fn get_data_mut<T: 'static>(&mut self) -> Option<&mut T> {
+        self.get_raw_data_mut(TypeId::of::<T>())
+            .and_then(|any| any.downcast_mut::<T>())
+    }
+
+    fn insert<T: 'static>(&mut self, value: T) {
+        self.insert_raw_data(TypeId::of::<T>(), Box::new(value));
+    }
+
+    fn get_or_init<T: 'static>(&mut self, init: fn() -> T) -> &T {
+        let id = TypeId::of::<T>();
+        if self.get_raw_data(id).is_none() {
+            self.insert_raw_data(id, Box::new(init()));
+        }
+        self.get_data::<T>().unwrap()
+    }
+
+    fn get_or_init_mut<T: 'static>(&mut self, init: fn() -> T) -> &mut T {
+        let id = TypeId::of::<T>();
+        if self.get_raw_data(id).is_none() {
+            self.insert_raw_data(id, Box::new(init()));
+        }
+        self.get_data_mut::<T>().unwrap()
+    }
+}
+
+impl SystemExt for Box<dyn System> {
+    fn get_data<T: 'static>(&self) -> Option<&T> {
+        (**self)
+            .get_raw_data(TypeId::of::<T>())
+            .and_then(|any| any.downcast_ref::<T>())
+    }
+
+    fn get_data_mut<T: 'static>(&mut self) -> Option<&mut T> {
+        (**self)
+            .get_raw_data_mut(TypeId::of::<T>())
+            .and_then(|any| any.downcast_mut::<T>())
+    }
+
+    fn insert<T: 'static>(&mut self, value: T) {
+        (**self).insert_raw_data(TypeId::of::<T>(), Box::new(value));
+    }
+
+    fn get_or_init<T: 'static>(&mut self, init: fn() -> T) -> &T {
+        let id = TypeId::of::<T>();
+        if (**self).get_raw_data(id).is_none() {
+            (**self).insert_raw_data(id, Box::new(init()));
+        }
+        self.get_data::<T>().unwrap()
+    }
+
+    fn get_or_init_mut<T: 'static>(&mut self, init: fn() -> T) -> &mut T {
+        let id = TypeId::of::<T>();
+        if (**self).get_raw_data(id).is_none() {
+            (**self).insert_raw_data(id, Box::new(init()));
+        }
+        self.get_data_mut::<T>().unwrap()
+    }
+}
+
+#[derive(Debug)]
+pub struct FunctionData {
+    data: FxHashMap<TypeId, Box<dyn Any>>,
+}
+
+impl FunctionData {
+    pub(crate) fn new() -> Self {
+        Self {
+            data: FxHashMap::with_hasher(BuildHasherDefault::new()),
+        }
+    }
+    pub fn get_data<T: 'static>(&self) -> Option<&T> {
+        self.data
+            .get(&TypeId::of::<T>())
+            .and_then(|any| any.downcast_ref::<T>())
+    }
+
+    pub fn get_data_mut<T: 'static>(&mut self) -> Option<&mut T> {
+        self.data
+            .get_mut(&TypeId::of::<T>())
+            .and_then(|any| any.downcast_mut::<T>())
+    }
+    pub fn get_or_init<T: 'static, F: FnOnce() -> T>(&mut self, init: F) -> &T {
+        let id = TypeId::of::<T>();
+        let entry = self.data.entry(id).or_insert_with(|| Box::new(init()));
+        entry.downcast_ref::<T>().unwrap()
+    }
+
+    pub fn get_or_init_mut<T: 'static, F: FnOnce() -> T>(&mut self, init: F) -> &mut T {
+        let id = TypeId::of::<T>();
+        let entry = self.data.entry(id).or_insert_with(|| Box::new(init()));
+        entry.downcast_mut::<T>().unwrap()
+    }
+    pub fn insert<T: 'static>(&mut self, value: T) {
+        let id = std::any::TypeId::of::<T>();
+        self.data.insert(id, Box::new(value));
+    }
+
+    pub(crate) fn get_raw_data(&self, type_id: &TypeId) -> Option<&Box<dyn Any>> {
+        self.data.get(type_id)
+    }
+
+    pub(crate) fn get_raw_data_mut(&mut self, type_id: &TypeId) -> Option<&mut Box<dyn Any>> {
+        self.data.get_mut(type_id)
+    }
+    pub(crate) fn insert_raw_data(&mut self, type_id: TypeId, value: Box<dyn Any>) {
+        self.data.insert(type_id, value);
+    }
+}
+
+#[derive(Debug)]
 pub struct FunctionSystem<Marker, F> {
-    pub func: F,
-    pub data: FunctionData,
-    pub _marker: std::marker::PhantomData<Marker>,
+    pub(crate) func: F,
+    pub(crate) data: FunctionData,
+    pub(crate) _marker: std::marker::PhantomData<Marker>,
 }
 
 impl<Marker, F> FunctionSystem<Marker, F> {
-    pub fn new(func: F) -> Self {
+    pub(crate) fn new(func: F) -> Self {
         Self {
             func,
             data: FunctionData::new(),
@@ -108,16 +225,32 @@ impl<Marker, F> FunctionSystem<Marker, F> {
     }
 }
 
-pub struct FunctionData {
-    pub(crate) last_run_generation: u8,
-    pub(crate) current_run_generation: u8,
+impl<Marker, F> SystemData for FunctionSystem<Marker, F> {
+    fn get_raw_data(&self, id: TypeId) -> Option<&Box<dyn Any>> {
+        self.data.get_raw_data(&id)
+    }
+
+    fn get_raw_data_mut(&mut self, id: TypeId) -> Option<&mut Box<dyn Any>> {
+        self.data.get_raw_data_mut(&id)
+    }
+
+    fn insert_raw_data(&mut self, id: TypeId, value: Box<dyn Any>) {
+        self.data.insert_raw_data(id, value);
+    }
 }
 
-impl FunctionData {
+pub struct FunctionGenerationData {
+    pub(crate) last_run_generation: u8,
+    pub(crate) current_run_generation: u8,
+    pub(crate) system_id: u32,
+}
+
+impl FunctionGenerationData {
     pub(crate) fn new() -> Self {
         Self {
             last_run_generation: 0,
             current_run_generation: 0,
+            system_id: 0,
         }
     }
 }
@@ -160,33 +293,5 @@ where
 {
     fn add_to_schedule(self, schedule: &mut Vec<Box<dyn System>>) {
         schedule.push(Box::new(self.into_system()));
-    }
-}
-
-impl<T: 'static> SystemParam for Res<T> {
-    fn get_access() -> ParamAccess {
-        let mut access = ParamAccess {
-            ..Default::default()
-        };
-        access.res_reads.push(std::any::TypeId::of::<T>());
-        access
-    }
-
-    fn extract(world: &mut World, _system_data: &mut FunctionData) -> Self {
-        unsafe { Self::new(world) }
-    }
-}
-
-impl<T: 'static> SystemParam for ResMut<T> {
-    fn get_access() -> ParamAccess {
-        let mut access = ParamAccess {
-            ..Default::default()
-        };
-        access.res_writes.push(std::any::TypeId::of::<T>());
-        access
-    }
-
-    fn extract(world: &mut World, _system_data: &mut FunctionData) -> Self {
-        unsafe { Self::new(world) }
     }
 }
