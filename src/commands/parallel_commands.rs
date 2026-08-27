@@ -45,7 +45,7 @@ impl ParallelCommands {
             {
                 let commands = Commands {
                     local_data: slot.data.get(),
-                    origin: CommandsOrigin::ThreadLocal(std::mem::transmute(&slot.is_busy)),
+                    origin: CommandsOrigin::ThreadLocal(&slot.is_busy as *const AtomicBool),
                     master_buffer: self.master_buffer_ptr,
                     _marker: std::marker::PhantomData,
                 };

@@ -5,7 +5,7 @@ use crate::{
 use std::marker::PhantomData;
 
 pub struct Res<'w, T: 'static> {
-    ptr: *const T,
+    val_ptr: *const T,
     _marker: PhantomData<(&'w (), T)>,
 }
 
@@ -13,13 +13,13 @@ impl<'w, T: 'static> Res<'w, T> {
     pub(crate) unsafe fn new(world: &World) -> Self {
         let res = world.get_resource::<T>();
         Self {
-            ptr: res as *const T,
+            val_ptr: res as *const T,
             _marker: PhantomData,
         }
     }
 
     pub fn get(&self) -> &T {
-        unsafe { &*self.ptr }
+        unsafe { &*self.val_ptr }
     }
 }
 
@@ -48,7 +48,7 @@ impl<'w, T: 'static> SystemParam for Res<'w, T> {
 }
 
 pub struct ResMut<'w, T: 'static> {
-    ptr: *mut T,
+    val_ptr: *mut T,
     _marker: PhantomData<(&'w (), T)>,
 }
 
@@ -56,20 +56,20 @@ impl<'w, T: 'static> ResMut<'w, T> {
     pub(crate) unsafe fn new(world: &mut World) -> Self {
         let res = world.get_resource_mut::<T>();
         Self {
-            ptr: res as *mut T,
+            val_ptr: res as *mut T,
             _marker: PhantomData,
         }
     }
 
     pub fn get_mut(&mut self) -> &mut T {
-        unsafe { &mut *self.ptr }
+        unsafe { &mut *self.val_ptr }
     }
 }
 
 impl<'w, T: 'static> std::ops::Deref for ResMut<'w, T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
-        unsafe { &*self.ptr }
+        unsafe { &*self.val_ptr }
     }
 }
 
@@ -93,5 +93,49 @@ impl<'w, T: 'static> SystemParam for ResMut<'w, T> {
 
     fn extract(world: &mut World, _system_data: &mut FunctionData) -> Self {
         unsafe { Self::new(world) }
+    }
+}
+
+impl<'w, T: 'static> SystemParam for Option<Res<'w, T>> {
+    fn get_access() -> ParamAccess {
+        let mut access = ParamAccess {
+            ..Default::default()
+        };
+        access.res_writes.push(std::any::TypeId::of::<T>());
+        access
+    }
+
+    fn extract(world: &mut World, _system_data: &mut FunctionData) -> Self {
+        let res_opt = world.get_resource_opt::<T>();
+        if let Some(res) = res_opt {
+            Some(Res {
+                val_ptr: res as *const T,
+                _marker: PhantomData,
+            })
+        } else {
+            None
+        }
+    }
+}
+
+impl<'w, T: 'static> SystemParam for Option<ResMut<'w, T>> {
+    fn get_access() -> ParamAccess {
+        let mut access = ParamAccess {
+            ..Default::default()
+        };
+        access.res_writes.push(std::any::TypeId::of::<T>());
+        access
+    }
+
+    fn extract(world: &mut World, _system_data: &mut FunctionData) -> Self {
+        let res_opt = world.get_resource_mut_opt::<T>();
+        if let Some(res) = res_opt {
+            Some(ResMut {
+                val_ptr: res as *mut T,
+                _marker: PhantomData,
+            })
+        } else {
+            None
+        }
     }
 }

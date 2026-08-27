@@ -190,6 +190,32 @@ pub struct Mut<'w, T> {
     pub(crate) _marker: std::marker::PhantomData<&'w mut T>,
 }
 
+impl<'w, T> Mut<'w, T> {
+    #[inline(always)]
+    pub fn into_raw_mut(self) -> &'w mut T {
+        unsafe { &mut *self.value }
+    }
+    #[inline(always)]
+    pub fn bypass_change_detection(&mut self) -> &mut T {
+        unsafe { &mut *self.value }
+    }
+
+    #[inline(always)]
+    pub fn trigger_change_detection(&mut self) {
+        if self.should_modify {
+            unsafe {
+                *self.marker =
+                    ChangedMarker(self.generation, self.system_id, std::marker::PhantomData);
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn as_ref(&self) -> &T {
+        unsafe { &*self.value }
+    }
+}
+
 unsafe impl<'w, T> Send for Mut<'w, T> {}
 unsafe impl<'w, T> Sync for Mut<'w, T> {}
 
@@ -227,30 +253,30 @@ impl<'w, T: std::fmt::Display> std::fmt::Display for Mut<'w, T> {
 }
 
 pub fn detect_changed(
-    marker_val: u8,
+    marker_value: u8,
     author_system_id: u32,
     current_generation: u8,
     system_last_generation: u8,
     previous_generation: u8,
     reading_system_id: u32,
 ) -> bool {
-    if marker_val == 0 {
+    if marker_value == 0 {
         return false;
     }
-    if marker_val == current_generation {
-        if system_last_generation == current_generation {
-            return false;
-        }
-        return reading_system_id > author_system_id;
-    }
-    if marker_val == previous_generation {
-        if system_last_generation == previous_generation {
-            return reading_system_id < author_system_id;
-        }
+    let is_current_generation = marker_value == current_generation;
+    let is_previous_generation = marker_value == previous_generation;
 
-        let two_generations_ago = GenerationRing::stale_threshold(current_generation);
-        return system_last_generation == two_generations_ago;
-    }
+    let reading_greater_than_author = reading_system_id > author_system_id;
+    let reading_less_than_author = reading_system_id < author_system_id;
+    let current_generation_result =
+        (system_last_generation != current_generation) & reading_greater_than_author;
 
-    false
+    let two_generations_ago = GenerationRing::stale_threshold(current_generation);
+    let previous_generation_result = if system_last_generation == previous_generation {
+        reading_less_than_author
+    } else {
+        system_last_generation == two_generations_ago
+    };
+    (is_current_generation & current_generation_result)
+        | (is_previous_generation & previous_generation_result)
 }

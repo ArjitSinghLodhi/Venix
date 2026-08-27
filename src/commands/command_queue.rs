@@ -10,6 +10,7 @@ pub(crate) trait WorldCommand: 'static + Send {
 
 struct CommandMeta {
     consume_and_advance: unsafe fn(payload_ptr: *mut u8, world: Option<&mut World>),
+    move_to_dest: unsafe fn(payload_ptr: *mut u8, dst: &mut CommandQueue),
     payload_offset: usize,
     block_size: usize,
 }
@@ -69,12 +70,23 @@ impl CommandQueue {
                         None => mem::drop(command),
                     }
                 },
+                move_to_dest: |payload_ptr, dest| {
+                    let command: C = ptr::read_unaligned(payload_ptr.cast());
+                    dest.push(command);
+                },
             };
             ptr::write(base_ptr.cast::<CommandMeta>(), meta);
             let payload_target = base_ptr.add(payload_offset).cast::<C>();
             ptr::write_unaligned(payload_target, command);
             self.u64_chunks.set_len(target_u64_count);
         }
+    }
+
+    pub(crate) fn push_fn<F>(&mut self, f: F)
+    where
+        F: FnOnce(&mut World) + Send + 'static,
+    {
+        self.push(FunctionCommand { func: f });
     }
 
     pub(crate) fn apply(&mut self, world: &mut World) {
@@ -154,36 +166,38 @@ impl CommandQueue {
             return;
         }
 
-        let local_bytes_len = other.u64_chunks.len() * mem::size_of::<u64>();
-        let old_bytes_len = self.u64_chunks.len() * mem::size_of::<u64>();
+        let total_bytes = other.u64_chunks.len() * mem::size_of::<u64>();
+        let mut local_cursor = 0;
+        let base_mut_ptr = other.u64_chunks.as_mut_ptr().cast::<u8>();
 
-        let meta_align = mem::align_of::<CommandMeta>();
-        let aligned_old_bytes = (old_bytes_len + meta_align - 1) & !(meta_align - 1);
-        let padding_gap = aligned_old_bytes - old_bytes_len;
+        while local_cursor < total_bytes {
+            unsafe {
+                let meta_align = mem::align_of::<CommandMeta>();
+                local_cursor = (local_cursor + meta_align - 1) & !(meta_align - 1);
 
-        let total_new_bytes = aligned_old_bytes + local_bytes_len;
-        let target_u64_count =
-            (total_new_bytes + mem::size_of::<u64>() - 1) / mem::size_of::<u64>();
-        let old_u64_count = self.u64_chunks.len();
-
-        self.u64_chunks.reserve(target_u64_count - old_u64_count);
-
-        unsafe {
-            let base_alloc_ptr = self.u64_chunks.as_mut_ptr().cast::<u8>().add(old_bytes_len);
-            ptr::write_bytes(base_alloc_ptr, 0, padding_gap);
-
-            let destination_ptr = self
-                .u64_chunks
-                .as_mut_ptr()
-                .cast::<u8>()
-                .add(aligned_old_bytes);
-            let source_ptr = other.u64_chunks.as_ptr().cast::<u8>();
-
-            std::ptr::copy_nonoverlapping(source_ptr, destination_ptr, local_bytes_len);
-
-            self.u64_chunks.set_len(target_u64_count);
+                if local_cursor >= total_bytes {
+                    break;
+                }
+                let base_ptr = base_mut_ptr.add(local_cursor);
+                let meta: CommandMeta = ptr::read(base_ptr.cast());
+                let payload_ptr = base_ptr.add(meta.payload_offset);
+                (meta.move_to_dest)(payload_ptr, self);
+                local_cursor += meta.block_size;
+            }
         }
-
         other.clear_bytes();
+    }
+}
+
+struct FunctionCommand<F>
+where
+    F: FnOnce(&mut World),
+{
+    func: F,
+}
+
+impl<T: Send + 'static + for<'a> FnOnce(&'a mut World)> WorldCommand for FunctionCommand<T> {
+    fn apply(self, world: &mut World) {
+        (self.func)(world)
     }
 }

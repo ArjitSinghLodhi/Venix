@@ -6,7 +6,7 @@ pub mod query;
 mod registry;
 pub mod resources;
 pub mod schedule;
-mod system;
+pub mod system;
 mod world;
 
 pub use fxhash;
@@ -33,6 +33,7 @@ pub mod prelude {
     pub use crate::resources::*;
     pub use crate::schedule::{DefaultSchedulesPlugin, schedule::*, schedules_list::*};
     pub use crate::system::validation::System;
+    pub use crate::system::validation::SystemId;
     pub use crate::world::storage::World;
 }
 

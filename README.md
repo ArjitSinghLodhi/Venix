@@ -6,7 +6,7 @@ A deterministic, high-concurrency Entity Component System written in Rust. Venix
 
 ## Performance & Invariant Guarantees
 
-* **Validated by Miri:** The internal engine utilizes raw pointer offsets and dense tabular memory operations. The entire codebase compiles with zero undefined behavior and strictly passes full miri verification.
+* **Validated by Miri:** The internal engine utilizes raw pointer offsets and dense tabular memory operations. The entire codebase compiles with zero undefined behavior and strictly passes full miri verification (Note: currently ParallelEventWriter does not pass Miri's stacked borrow rules).
 * **Dense Archetype Architecture:** Entities sharing identical component configurations are packed contiguously into unified archetype tables. This layout ensures sequential vector access, eliminates indirect pointer hopping, and maximizes CPU L1/L2 cache line utility.
 * **Work-Stealing Concurrency:** Native integration with a high-performance Rayon worker pool enables parallel processing over archetype data batches without runtime dispatch overhead.
 * **Static Access Routing:** Query parameter bounds constraints (With, Without, Changed) to resolve structural archetype filtering paths instantly before execution loops initiate.

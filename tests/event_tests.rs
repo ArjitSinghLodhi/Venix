@@ -17,9 +17,9 @@ fn increment_frame_system(mut counter: ResMut<FrameCounter>) {
 }
 
 fn pre_emit_verify_system(counter: Res<FrameCounter>, reader: EventReader<ThreatEvent>) {
-    let count = reader.read().count();
+    let count = reader.read_scope(|iter| iter.count());
     assert!(
-        reader.read().all(|event| event.value == 10.0),
+        reader.read_scope(|mut iter| iter.all(|event| event.value == 10.0)),
         "Value corrupted or not same"
     );
     if counter.current_frame == 1 {
@@ -50,9 +50,9 @@ fn emitter_system(counter: Res<FrameCounter>, mut writer: EventWriter<ThreatEven
 }
 
 fn post_emit_verify_system(counter: Res<FrameCounter>, reader: EventReader<ThreatEvent>) {
-    let count = reader.read().count();
+    let count = reader.read_scope(|iter| iter.count());
     assert!(
-        reader.read().all(|event| event.value == 10.0),
+        reader.read_scope(|mut iter| iter.all(|event| event.value == 10.0)),
         "Value corrupted or not same"
     );
     if counter.current_frame == 1 {
@@ -121,7 +121,7 @@ fn parallel_execution_system(
             let par_writer_ref = &par_writer;
 
             s.spawn(move || {
-                let _ = reader_ref.read().count();
+                let _ = reader_ref.read_scope(|iter| iter.count());
             });
 
             s.spawn(move || {
@@ -144,7 +144,7 @@ fn parallel_execution_system(
 }
 
 fn parallel_verification_system(counter: Res<FrameCounter>, reader: EventReader<ThreatEvent>) {
-    let count = reader.read().count();
+    let count = reader.read_scope(|iter| iter.count());
 
     if counter.current_frame == 1 {
         assert_eq!(count, 11);
@@ -152,13 +152,15 @@ fn parallel_verification_system(counter: Res<FrameCounter>, reader: EventReader<
         let mut base_count = 0;
         let mut parallel_count = 0;
 
-        for event in reader.read() {
-            if event.value == 100.0 {
-                base_count += 1;
-            } else if event.value == 10.0 {
-                parallel_count += 1;
+        reader.read_scope(|iter| {
+            for event in iter {
+                if event.value == 100.0 {
+                    base_count += 1;
+                } else if event.value == 10.0 {
+                    parallel_count += 1;
+                }
             }
-        }
+        });
 
         assert_eq!(base_count, 1);
         assert_eq!(parallel_count, 10);

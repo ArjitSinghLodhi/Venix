@@ -295,3 +295,22 @@ where
         schedule.push(Box::new(self.into_system()));
     }
 }
+
+pub struct SystemId(u32);
+
+impl SystemId {
+    pub fn get_id(&self) -> u32 {
+        self.0
+    }
+}
+
+impl SystemParam for SystemId {
+    fn get_access() -> ParamAccess {
+        ParamAccess::default()
+    }
+
+    fn extract(_world: &mut World, system_data: &mut FunctionData) -> Self {
+        let generation_data = system_data.get_data::<FunctionGenerationData>().unwrap();
+        Self(generation_data.system_id)
+    }
+}

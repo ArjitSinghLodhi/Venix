@@ -73,7 +73,7 @@ pub(crate) struct EventQueue<T: 'static> {
 }
 
 pub(crate) enum EventWriterOrigin<T: 'static + Send> {
-    ThreadLocal(&'static AtomicBool),
+    ThreadLocal(*const AtomicBool),
     HeapFallback(*mut EventQueue<T>),
 }
 
@@ -105,7 +105,7 @@ impl<T: 'static> EventQueue<T> {
 pub struct EventWriter<'a, T: 'static + Send> {
     pub(crate) local_data: *mut EventQueue<T>,
     pub(crate) origin: EventWriterOrigin<T>,
-    pub(crate) master_buffer: *mut EventBuffer<T>,
+    pub(crate) master_buffer: *const EventBuffer<T>,
     pub(crate) generation: u8,
     pub(crate) system_id: u32,
     pub(crate) _marker: PhantomData<&'a ()>,
@@ -121,7 +121,7 @@ impl<'a, T: 'static + Send> EventWriter<'a, T> {
         }
     }
 }
-impl<'a, T: 'static + Send + Sync> SystemParam for EventWriter<'a, T> {
+impl<'a, T: 'static + Send> SystemParam for EventWriter<'a, T> {
     fn get_access() -> ParamAccess {
         ParamAccess::default()
     }
@@ -147,7 +147,7 @@ impl<'a, T: 'static + Send + Sync> SystemParam for EventWriter<'a, T> {
             {
                 Self {
                     local_data: slot.data.get(),
-                    origin: EventWriterOrigin::ThreadLocal(std::mem::transmute(&slot.is_busy)),
+                    origin: EventWriterOrigin::ThreadLocal(&slot.is_busy as *const AtomicBool),
                     master_buffer: buffer_ptr,
                     generation: current_gen,
                     system_id: sys_id,
@@ -180,7 +180,7 @@ impl<'a, T: 'static + Send> Drop for EventWriter<'a, T> {
 
             match self.origin {
                 EventWriterOrigin::ThreadLocal(is_busy_flag) => {
-                    is_busy_flag.store(false, Ordering::Relaxed);
+                    (*is_busy_flag).store(false, Ordering::Relaxed);
                 }
                 EventWriterOrigin::HeapFallback(heap_ptr) => {
                     let _cleanup = Box::from_raw(heap_ptr);
@@ -192,7 +192,7 @@ impl<'a, T: 'static + Send> Drop for EventWriter<'a, T> {
 
 pub struct EventIterator<'a, T: 'static> {
     _guard: std::sync::RwLockReadGuard<'a, EventQueue<T>>,
-    raw_iter: std::slice::Iter<'static, Event<T>>,
+    index: usize,
     current_gen: u8,
     system_last_gen: u8,
     previous_gen: u8,
@@ -204,26 +204,27 @@ impl<'a, T: 'static> Iterator for EventIterator<'a, T> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(event) = self.raw_iter.next() {
-            if should_be_read(
-                event.generation,
-                event.author_id,
-                self.current_gen,
-                self.system_last_gen,
-                self.previous_gen,
-                self.reading_sys_id,
-            ) {
-                unsafe {
-                    return Some(&*(&event.event as *const T));
+        while self.index < self._guard.queue.len() {
+            let event_ptr = &self._guard.queue[self.index] as *const Event<T>;
+            self.index += 1;
+
+            unsafe {
+                let event = &*event_ptr;
+                if should_be_read(
+                    event.generation,
+                    event.author_id,
+                    self.current_gen,
+                    self.system_last_gen,
+                    self.previous_gen,
+                    self.reading_sys_id,
+                ) {
+                    return Some(&event.event);
                 }
             }
         }
         None
     }
 }
-
-unsafe impl<'a, T: 'static + Send> Send for EventIterator<'a, T> {}
-unsafe impl<'a, T: 'static + Send> Sync for EventIterator<'a, T> {}
 
 pub struct EventReader<'w, T: 'static + Send> {
     system_last_gen: u8,
@@ -234,36 +235,35 @@ pub struct EventReader<'w, T: 'static + Send> {
     _marker: PhantomData<(&'w (), T)>,
 }
 
-unsafe impl<'w, T: 'static + Send> Send for EventReader<'w, T> {}
-unsafe impl<'w, T: 'static + Send> Sync for EventReader<'w, T> {}
-
-impl<'w, T: 'static + Send + Sync> EventReader<'w, T> {
-    pub fn read(&self) -> EventIterator<'_, T> {
+impl<'w, T: 'static + Send> EventReader<'w, T> {
+    pub fn read_scope<F, R>(&self, f: F) -> R
+    where
+        F: for<'a> FnOnce(EventIterator<'a, T>) -> R,
+    {
         let current_gen = self.current_gen;
         let system_last_gen = self.system_last_gen;
         let previous_gen = self.previous_gen;
         let reading_sys_id = self.reading_system_id;
 
         unsafe {
-            let guard = (*self.queue).master_queue.read().unwrap();
-            let raw_iter = std::mem::transmute::<
-                std::slice::Iter<'_, Event<T>>,
-                std::slice::Iter<'static, Event<T>>,
-            >(guard.queue.iter());
-            EventIterator {
+            let guard = (&*self.queue).master_queue.read().unwrap();
+
+            let iter = EventIterator {
                 _guard: guard,
-                raw_iter,
+                index: 0,
                 current_gen,
                 system_last_gen,
                 previous_gen,
                 reading_sys_id,
-            }
+            };
+
+            f(iter)
         }
     }
 }
 
 impl<'w, T: 'static + Send> SystemParam for EventReader<'w, T> {
-    fn get_access() -> crate::extensions::ParamAccess {
+    fn get_access() -> ParamAccess {
         ParamAccess::default()
     }
 
@@ -287,31 +287,36 @@ impl<'w, T: 'static + Send> SystemParam for EventReader<'w, T> {
     }
 }
 
-fn should_be_read(
-    event_gen: u8,
+unsafe impl<'w, T: 'static + Send> Send for EventReader<'w, T> {}
+unsafe impl<'w, T: 'static + Send> Sync for EventReader<'w, T> {}
+
+pub fn should_be_read(
+    event_generation: u8,
     author_system_id: u32,
     current_generation: u8,
     system_last_generation: u8,
     previous_generation: u8,
     reading_system_id: u32,
 ) -> bool {
-    if event_gen == 0 {
+    if event_generation == 0 {
         return false;
     }
-    if event_gen == current_generation {
-        if system_last_generation == current_generation {
-            return false;
-        }
-        return reading_system_id > author_system_id;
-    }
-    if event_gen == previous_generation {
-        if system_last_generation == previous_generation {
-            return reading_system_id < author_system_id;
-        }
+    let is_current_generation = event_generation == current_generation;
+    let is_previous_generation = event_generation == previous_generation;
 
-        let two_generations_ago = GenerationRing::stale_threshold(current_generation);
-        return system_last_generation == two_generations_ago;
-    }
+    let reading_greater_than_author = reading_system_id > author_system_id;
+    let reading_less_than_author = reading_system_id < author_system_id;
 
-    false
+    let current_generation_result =
+        (system_last_generation != current_generation) & reading_greater_than_author;
+
+    let two_generations_ago = GenerationRing::stale_threshold(current_generation);
+    let previous_generation_result = if system_last_generation == previous_generation {
+        reading_less_than_author
+    } else {
+        system_last_generation == two_generations_ago
+    };
+
+    (is_current_generation & current_generation_result)
+        | (is_previous_generation & previous_generation_result)
 }

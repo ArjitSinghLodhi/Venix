@@ -569,7 +569,7 @@ impl CommandBuffer {
 }
 
 pub(crate) enum CommandsOrigin {
-    ThreadLocal(&'static AtomicBool),
+    ThreadLocal(*const AtomicBool),
     HeapFallback(*mut CommandsBufferData),
 }
 
@@ -634,6 +634,24 @@ impl Commands<'_> {
             }
         }
     }
+    pub(crate) fn push_fn<F>(&mut self, f: F)
+    where
+        F: FnOnce(&mut World) + Send + 'static,
+    {
+        unsafe {
+            (*self.local_data).queue.push_fn(f);
+        }
+    }
+
+    pub fn insert_resource<T: 'static + Send>(&mut self, resource: T) {
+        self.push_fn(|world| world.insert_resource(resource));
+    }
+
+    pub fn remove_resource<T: 'static + Send>(&mut self) {
+        self.push_fn(|world| {
+            world.remove_resource::<T>();
+        });
+    }
 }
 
 impl<'a> SystemParam for Commands<'a> {
@@ -656,7 +674,7 @@ impl<'a> SystemParam for Commands<'a> {
             {
                 Self {
                     local_data: slot.data.get(),
-                    origin: CommandsOrigin::ThreadLocal(std::mem::transmute(&slot.is_busy)),
+                    origin: CommandsOrigin::ThreadLocal(&slot.is_busy as *const AtomicBool),
                     master_buffer: master_buffer_ptr,
                     _marker: std::marker::PhantomData,
                 }
@@ -693,7 +711,7 @@ impl<'a> Drop for Commands<'a> {
             }
             match self.origin {
                 CommandsOrigin::ThreadLocal(is_busy_flag) => {
-                    is_busy_flag.store(false, Ordering::Relaxed);
+                    (*is_busy_flag).store(false, Ordering::Relaxed);
                 }
                 CommandsOrigin::HeapFallback(heap_ptr) => {
                     let _cleanup = Box::from_raw(heap_ptr);

@@ -1,5 +1,6 @@
 use std::{
     cell::UnsafeCell,
+    marker::PhantomData,
     sync::atomic::{AtomicBool, Ordering},
 };
 
@@ -13,16 +14,17 @@ use crate::{
     world::storage::GenerationRing,
 };
 
-pub struct ParallelEventWriter<T: 'static + Send> {
-    master_buffer: *mut EventBuffer<T>,
+pub struct ParallelEventWriter<'w, T: 'static + Send> {
+    master_buffer: *const EventBuffer<T>,
     generation: u8,
     system_id: u32,
+    _marker: PhantomData<&'w ()>,
 }
 
-unsafe impl<T: 'static + Send> Send for ParallelEventWriter<T> {}
-unsafe impl<T: 'static + Send> Sync for ParallelEventWriter<T> {}
+unsafe impl<'w, T: 'static + Send> Send for ParallelEventWriter<'w, T> {}
+unsafe impl<'w, T: 'static + Send> Sync for ParallelEventWriter<'w, T> {}
 
-impl<T: 'static + Send> ParallelEventWriter<T> {
+impl<'w, T: 'static + Send> ParallelEventWriter<'w, T> {
     pub fn scope<F, R>(&self, f: F) -> R
     where
         F: for<'b> FnOnce(EventWriter<'b, T>) -> R,
@@ -42,7 +44,7 @@ impl<T: 'static + Send> ParallelEventWriter<T> {
             {
                 EventWriter {
                     local_data: slot.data.get(),
-                    origin: EventWriterOrigin::ThreadLocal(std::mem::transmute(&slot.is_busy)),
+                    origin: EventWriterOrigin::ThreadLocal(&slot.is_busy as *const AtomicBool),
                     master_buffer: self.master_buffer,
                     generation: self.generation,
                     system_id: self.system_id,
@@ -66,19 +68,20 @@ impl<T: 'static + Send> ParallelEventWriter<T> {
     }
 }
 
-impl<T: 'static + Send + Sync> SystemParam for ParallelEventWriter<T> {
+impl<'w, T: 'static + Send> SystemParam for ParallelEventWriter<'w, T> {
     fn get_access() -> ParamAccess {
         ParamAccess::default()
     }
 
     fn extract(world: &mut World, system_data: &mut FunctionData) -> Self {
-        let buffer_ptr = world.get_resource_mut::<EventBuffer<T>>() as *mut EventBuffer<T>;
+        let buffer_ptr = world.get_resource::<EventBuffer<T>>() as *const EventBuffer<T>;
         let generation_data = system_data.get_data::<FunctionGenerationData>().unwrap();
 
         Self {
             master_buffer: buffer_ptr,
             generation: GenerationRing::current(),
             system_id: generation_data.system_id,
+            _marker: PhantomData,
         }
     }
 }
