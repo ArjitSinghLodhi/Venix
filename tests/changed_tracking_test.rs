@@ -279,3 +279,61 @@ rusty_fork_test! {
         app.run();
     }
 }
+
+fn spawn_tracking_entity(mut commands: Commands) {
+    commands.spawn((Position { x: 5.0, y: 5.0 }, Velocity { x: 1.0, y: 1.0 }));
+}
+
+fn modify_component_system(mut query: Query<&mut Position>) {
+    for mut view in query.iter_mut() {
+        for mut pos in view.iter_mut() {
+            pos.x = 50.0;
+        }
+    }
+}
+
+fn verify_change_tracking(query: Query<&Position, Changed<Position>>) {
+    let mut change_detected = false;
+    for view in query.iter() {
+        for pos in view.iter() {
+            if pos.x == 50.0 {
+                change_detected = true;
+            }
+        }
+    }
+    assert!(change_detected);
+}
+
+fn verify_change_tracking_data(query: Query<(&Position, ChangedTracker<Velocity>)>) {
+    let mut change_detected_track = false;
+    for view in query.iter() {
+        for (pos, mark) in view.iter() {
+            if pos.x == 50.0 && !mark.is_changed() {
+                change_detected_track = true;
+            }
+        }
+    }
+    assert!(change_detected_track);
+}
+
+rusty_fork_test! {
+    #[test]
+    fn test_changed_generational_tracking() {
+        let mut app = App::new();
+        app.add_plugins(DefaultSchedulesPlugin)
+            .add_systems(Startup::id(), spawn_tracking_entity)
+            .add_systems(
+                Update::id(),
+                (modify_component_system, verify_change_tracking, verify_change_tracking_data),
+            );
+
+        app.set_runner(test_runner_once);
+        app.run();
+    }
+}
+
+fn test_runner_once(app: &mut App) {
+    app.build();
+    app.run_startup();
+    app.update();
+}

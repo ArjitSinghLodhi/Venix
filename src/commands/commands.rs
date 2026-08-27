@@ -1,8 +1,11 @@
 use std::{
-    any::TypeId, cell::UnsafeCell, ptr::NonNull, sync::{
+    any::TypeId,
+    cell::UnsafeCell,
+    ptr::NonNull,
+    sync::{
         Arc, RwLock,
         atomic::{AtomicBool, Ordering},
-    }
+    },
 };
 
 use fxhash::{FxBuildHasher, FxHashMap, FxHashSet};
@@ -15,7 +18,6 @@ use crate::{
         command_queue::{CommandQueue, WorldCommand},
     },
     entity::Entity,
-    query::changed::TRACKED_COMPONENTS,
     registry::{REGISTRY, RegistryCell},
     system::validation::{FunctionData, ParamAccess, SystemParam},
     world::{
@@ -23,6 +25,9 @@ use crate::{
         storage::World,
     },
 };
+
+#[cfg(feature = "change-detection")]
+use crate::query::changed::TRACKED_COMPONENTS;
 
 pub(crate) struct SpawnCommand<T: ComponentBundle> {
     pub(crate) components: T,
@@ -43,7 +48,7 @@ impl<T: ComponentBundle + Send> WorldCommand for SpawnCommand<T> {
 
         arch.entities.push(Entity::new(assigned_registry_idx));
         self.components.push_to_archetype(arch);
-
+        #[cfg(feature = "change-detection")]
         unsafe {
             let columns = &mut *arch.columns.get();
             initialize_spawn_markers(columns);
@@ -146,22 +151,26 @@ impl<T: ComponentBundle + Send> WorldCommand for AddComponentsCommand<T> {
                 if new_cols.is_empty() {
                     T::create_empty_columns(new_cols);
                     clone_existing_columns(old_cols, new_cols);
+                    #[cfg(feature = "change-detection")]
                     initialize_missing_archetype_markers(&new_arch.types, new_cols);
                 }
                 move_matching_columns(old_cols, new_cols, old_idx as usize);
             }
             let new_dense_idx = new_arch.entities.len() as u32;
             self.components.push_to_archetype(new_arch);
-            let fresh_old_cols = &mut *old_arch.columns.get();
-            let fresh_new_cols = &mut *new_arch.columns.get();
+            #[cfg(feature = "change-detection")]
+            {
+                let fresh_old_cols = &mut *old_arch.columns.get();
+                let fresh_new_cols = &mut *new_arch.columns.get();
 
-            migrate_addition_markers(
-                &old_arch.types,
-                old_idx as usize,
-                incoming_ids,
-                fresh_old_cols,
-                fresh_new_cols,
-            );
+                migrate_addition_markers(
+                    &old_arch.types,
+                    old_idx as usize,
+                    incoming_ids,
+                    fresh_old_cols,
+                    fresh_new_cols,
+                );
+            }
             swap_remove_entity_registry_update(old_arch, old_idx);
             let entity_handle = old_arch.entities.swap_remove(old_idx as usize);
             new_arch.entities.push(entity_handle);
@@ -213,6 +222,7 @@ impl<T: ComponentBundle + Send> WorldCommand for InsertComponentsCommand<T> {
                 if new_cols.is_empty() {
                     T::create_empty_columns(new_cols);
                     clone_existing_columns(old_cols, new_cols);
+                    #[cfg(feature = "change-detection")]
                     initialize_missing_archetype_markers(&new_arch.types, new_cols);
                 }
 
@@ -221,16 +231,19 @@ impl<T: ComponentBundle + Send> WorldCommand for InsertComponentsCommand<T> {
             self.components
                 .insert_to_archetype(new_arch, new_dense_idx as usize);
 
-            let fresh_old_cols = &mut *old_arch.columns.get();
-            let fresh_new_cols = &mut *new_arch.columns.get();
+            #[cfg(feature = "change-detection")]
+            {
+                let fresh_old_cols = &mut *old_arch.columns.get();
+                let fresh_new_cols = &mut *new_arch.columns.get();
 
-            migrate_addition_markers(
-                &old_arch.types,
-                old_idx as usize,
-                incoming_ids,
-                fresh_old_cols,
-                fresh_new_cols,
-            );
+                migrate_addition_markers(
+                    &old_arch.types,
+                    old_idx as usize,
+                    incoming_ids,
+                    fresh_old_cols,
+                    fresh_new_cols,
+                );
+            }
 
             swap_remove_entity_registry_update(old_arch, old_idx);
             let entity_handle = old_arch.entities.swap_remove(old_idx as usize);
@@ -274,7 +287,10 @@ impl<T: ComponentBundle + Send> WorldCommand for RemoveComponentsCommand<T> {
             let new_dense_idx = new_arch.entities.len() as u32;
             move_matching_columns(old_cols, new_cols, old_idx as usize);
             erase_subtracted_columns(removed_ids, old_cols, old_idx as usize);
+
+            #[cfg(feature = "change-detection")]
             erase_subtracted_markers(&old_arch.types, &new_arch.types, old_cols, old_idx as usize);
+
             swap_remove_entity_registry_update(old_arch, old_idx);
 
             let entity_handle = old_arch.entities.swap_remove(old_idx as usize);
@@ -353,6 +369,8 @@ fn create_addition_archetype<T: ComponentBundle>(
     for id in incoming_ids {
         new_types.insert(*id);
     }
+
+    #[cfg(feature = "change-detection")]
     world
         .archetypes_manager
         .sync_tracking_markers(&mut new_types);
@@ -380,6 +398,8 @@ fn create_subtraction_archetype<T: ComponentBundle>(
     for id in removed_ids {
         new_types.remove(id);
     }
+
+    #[cfg(feature = "change-detection")]
     world
         .archetypes_manager
         .sync_tracking_markers(&mut new_types);
@@ -467,6 +487,7 @@ unsafe fn swap_remove_entity_registry_update(arch: &mut Archetype, removed_row_i
     }
 }
 
+#[cfg(feature = "change-detection")]
 #[inline(always)]
 fn initialize_spawn_markers(columns: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>) {
     let tracked = TRACKED_COMPONENTS.read().unwrap();
@@ -477,6 +498,7 @@ fn initialize_spawn_markers(columns: &mut IndexMap<TypeId, ComponentColumn, FxBu
     }
 }
 
+#[cfg(feature = "change-detection")]
 #[inline(always)]
 fn initialize_missing_archetype_markers(
     types: &FxHashSet<TypeId>,
@@ -490,6 +512,7 @@ fn initialize_missing_archetype_markers(
     }
 }
 
+#[cfg(feature = "change-detection")]
 #[inline(always)]
 unsafe fn migrate_addition_markers(
     old_types: &FxHashSet<TypeId>,
@@ -517,6 +540,7 @@ unsafe fn migrate_addition_markers(
     }
 }
 
+#[cfg(feature = "change-detection")]
 #[inline(always)]
 unsafe fn erase_subtracted_markers(
     old_types: &FxHashSet<TypeId>,
@@ -591,7 +615,8 @@ impl Commands<'_> {
 
     pub fn despawn(&mut self, entity: Entity) {
         unsafe {
-            self.local_data.as_mut()
+            self.local_data
+                .as_mut()
                 .despawns
                 .insert(DespawnCommand { entity });
         }

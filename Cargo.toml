@@ -1,6 +1,6 @@
 [package]
 name = "venix"
-version = "1.2.8"
+version = "1.2.9"
 edition = "2024"
 description = "A high-performance, archetype-based ECS engine written in Rust."
 readme = "README.md"
@@ -8,10 +8,6 @@ repository = "https://github.com/ArjitSinghLodhi/Venix"
 license = "MIT OR Apache-2.0"
 keywords = ["ecs", "archetype", "simulation", "parallel"]
 categories = ["game-engines", "development-tools"]
-
-[features]
-default = []
-derive = ["dep:venix_macros"]
 
 [dependencies]
 venix_macros = {version = "1.0.2", optional = true }
@@ -39,3 +35,13 @@ path = "tests/event_tests.rs"
 name = "derive_test"
 path = "tests/derive_tests.rs"
 required-features = ["derive"]
+
+[[test]]
+name = "change_track_test"
+path = "tests/changed_tracking_test.rs"
+required-features = ["change-detection"]
+
+[features]
+default = []
+derive = ["dep:venix_macros"]
+change-detection = []

@@ -1,7 +1,12 @@
 use std::{
-    any::{Any, TypeId}, cell::UnsafeCell, marker::PhantomData, ptr::NonNull, sync::{
-        Arc, RwLock, atomic::{AtomicBool, Ordering}
-    }
+    any::{Any, TypeId},
+    cell::UnsafeCell,
+    marker::PhantomData,
+    ptr::NonNull,
+    sync::{
+        Arc, RwLock,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use thread_local::ThreadLocal;
@@ -111,7 +116,8 @@ impl<'a, T: 'static + Send> EventWriter<'a, T> {
     #[inline]
     pub fn send(&mut self, event: T) {
         unsafe {
-            self.local_data.as_mut()
+            self.local_data
+                .as_mut()
                 .queue
                 .push(Event::new(event, self.generation, self.system_id));
         }
@@ -227,7 +233,7 @@ pub struct EventReader<'w, T: 'static + Send> {
     previous_gen: u8,
     current_gen: u8,
     reading_system_id: u32,
-    queue: Arc<RwLock<EventQueue<T>>>, 
+    queue: Arc<RwLock<EventQueue<T>>>,
     _marker: PhantomData<&'w EventBuffer<T>>,
 }
 

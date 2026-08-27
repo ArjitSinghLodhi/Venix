@@ -10,10 +10,12 @@ use std::{
 use crate::{
     commands::{CommandBuffer, bundle::ComponentBundle},
     events::TRACKED_EVENTS,
-    query::changed::TRACKED_COMPONENTS,
     registry::REGISTRY,
     world::archetypes::{ArchetypeId, ArchetypeManager},
 };
+
+#[cfg(feature = "change-detection")]
+use crate::query::changed::TRACKED_COMPONENTS;
 
 pub struct GenerationRing;
 static GLOBAL_GEN: AtomicU8 = AtomicU8::new(1);
@@ -148,10 +150,12 @@ impl World {
 
     pub(crate) fn end_of_frame_sync(&mut self) {
         GenerationRing::advance();
+        #[cfg(feature = "change-detection")]
         self.clear_changed_tracker();
         self.clear_events();
     }
 
+    #[cfg(feature = "change-detection")]
     fn clear_changed_tracker(&mut self) {
         let tracked = TRACKED_COMPONENTS.read().unwrap();
 

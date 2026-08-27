@@ -4,12 +4,15 @@ use fxhash::FxHashSet;
 
 use crate::{
     entity::Entity,
-    query::{
-        changed::{ChangedMarker, Mut},
-        query::QueryData,
-    },
-    system::validation::{AccessVec, FunctionData, FunctionGenerationData},
-    world::{archetypes::Archetype, storage::GenerationRing},
+    query::query::QueryData,
+    system::validation::{AccessVec, FunctionData},
+    world::archetypes::Archetype,
+};
+#[cfg(feature = "change-detection")]
+use crate::{
+    query::changed::{ChangedMarker, Mut},
+    system::validation::FunctionGenerationData,
+    world::storage::GenerationRing,
 };
 
 impl<T: 'static> QueryData for &T {
@@ -37,6 +40,37 @@ impl<T: 'static> QueryData for &T {
     }
 }
 
+#[cfg(not(feature = "change-detection"))]
+impl<T: 'static> QueryData for &mut T {
+    type Item<'w> = &'w mut T;
+    type ReadOnlyItem<'w> = &'w T;
+    type Fetch = *mut T;
+
+    fn matches(types: &FxHashSet<TypeId>) -> bool {
+        types.contains(&TypeId::of::<T>())
+    }
+
+    unsafe fn init_fetch(archetype: &Archetype, _data: &mut FunctionData) -> Self::Fetch {
+        unsafe {
+            (*archetype.fetch_column_raw::<T>()).as_mut_ptr()
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn fetch_mut<'w>(fetch: Self::Fetch, index: usize) -> Self::Item<'w> {
+        unsafe { &mut *fetch.add(index) }
+    }
+
+    unsafe fn fetch_read_only<'w>(fetch: Self::Fetch, index: usize) -> Self::ReadOnlyItem<'w> {
+        unsafe { &*fetch.add(index) }
+    }
+
+    fn collect_access(_reads: &mut AccessVec<TypeId>, writes: &mut AccessVec<TypeId>) {
+        writes.push(TypeId::of::<T>());
+    }
+}
+
+#[cfg(feature = "change-detection")]
 impl<T: 'static> QueryData for &mut T {
     type Item<'w> = Mut<'w, T>;
     type ReadOnlyItem<'w> = &'w T;
@@ -164,6 +198,58 @@ impl<T: 'static> QueryData for Option<&T> {
         }
     }
 }
+
+#[cfg(not(feature = "change-detection"))]
+impl<T: 'static> QueryData for Option<&mut T> {
+    type Item<'w> = Option<&'w mut T>;
+    type ReadOnlyItem<'w> = Option<&'w T>;
+    type Fetch = Option<*mut T>;
+
+    fn matches(_types: &FxHashSet<TypeId>) -> bool {
+        true
+    }
+
+    fn collect_access(_reads: &mut AccessVec<TypeId>, writes: &mut AccessVec<TypeId>) {
+        writes.push(TypeId::of::<T>());
+    }
+
+    unsafe fn init_fetch(archetype: &Archetype, _data: &mut FunctionData) -> Self::Fetch {
+        unsafe {
+            let columns = &mut *archetype.columns.get();
+            let component_id = TypeId::of::<T>();
+            if columns.contains_key(&component_id) {
+                let data_ptr = (*archetype.fetch_column_raw::<T>()).as_mut_ptr();
+                Some(data_ptr)
+            } else {
+                None
+            }
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn fetch_mut<'w>(fetch: Self::Fetch, index: usize) -> Self::Item<'w> {
+        unsafe {
+            if let Some(data_head) = fetch {
+                Some(&mut *data_head.add(index))
+            } else {
+                None
+            }
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn fetch_read_only<'w>(fetch: Self::Fetch, index: usize) -> Self::ReadOnlyItem<'w> {
+        unsafe {
+            if let Some(data_head) = fetch {
+                Some(&*data_head.add(index))
+            } else {
+                None
+            }
+        }
+    }
+}
+
+#[cfg(feature = "change-detection")]
 
 impl<T: 'static> QueryData for Option<&mut T> {
     type Item<'w> = Option<Mut<'w, T>>;

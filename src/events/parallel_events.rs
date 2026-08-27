@@ -1,5 +1,8 @@
 use std::{
-    cell::UnsafeCell, marker::PhantomData, ptr::NonNull, sync::atomic::{AtomicBool, Ordering}
+    cell::UnsafeCell,
+    marker::PhantomData,
+    ptr::NonNull,
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 use crate::{

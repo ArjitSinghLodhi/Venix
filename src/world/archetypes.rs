@@ -7,9 +7,10 @@ use std::{
 use fxhash::{FxBuildHasher, FxHashMap, FxHashSet};
 use indexmap::{IndexMap, IndexSet};
 
-use crate::{
-    commands::bundle::ComponentBundle, entity::Entity, query::changed::TRACKED_COMPONENTS,
-};
+use crate::{commands::bundle::ComponentBundle, entity::Entity};
+
+#[cfg(feature = "change-detection")]
+use crate::query::changed::TRACKED_COMPONENTS;
 
 pub(crate) trait AnyColumn: Any {
     unsafe fn swap_remove_erased(&mut self, idx: usize);
@@ -128,6 +129,7 @@ impl ArchetypeManager {
         combined_hash
     }
 
+    #[cfg(feature = "change-detection")]
     pub(crate) fn sync_tracking_markers(&self, types: &mut FxHashSet<TypeId>) {
         if let Ok(tracked) = TRACKED_COMPONENTS.read() {
             for meta in tracked.iter() {
@@ -150,7 +152,10 @@ impl ArchetypeManager {
         for id in incoming_ids {
             target_types.insert(*id);
         }
+
+        #[cfg(feature = "change-detection")]
         self.sync_tracking_markers(&mut target_types);
+
         let hash = self.calculate_hash(&target_types);
         self.index.get(&hash).copied()
     }
@@ -165,7 +170,10 @@ impl ArchetypeManager {
         for id in removed_ids {
             target_types.remove(id);
         }
+
+        #[cfg(feature = "change-detection")]
         self.sync_tracking_markers(&mut target_types);
+
         let hash = self.calculate_hash(&target_types);
         self.index.get(&hash).copied()
     }
@@ -198,6 +206,8 @@ impl ArchetypeManager {
         for &id in incoming_ids {
             types_set.insert(id);
         }
+
+        #[cfg(feature = "change-detection")]
         self.sync_tracking_markers(&mut types_set);
 
         let order_independent_hash = self.calculate_hash(&types_set);
@@ -219,6 +229,7 @@ impl ArchetypeManager {
         let mut columns = IndexMap::with_hasher(FxBuildHasher::default());
         T::create_empty_columns(&mut columns);
 
+        #[cfg(feature = "change-detection")]
         if let Ok(tracked) = TRACKED_COMPONENTS.read() {
             let marker_columns: Vec<_> = tracked
                 .iter()

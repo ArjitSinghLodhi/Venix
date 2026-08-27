@@ -33,6 +33,7 @@ Note: All logic tracking changes via Changed filters must execute within this 2-
 
 ### Procedural Macro Derives
 Enable the derive feature flag to unlock zero-cost data abstractions. The engine's code generation framework automatically handles visibility and structure:
+Available through the feature flag `derive`.
 
 * `#[derive(ComponentBundle)]` – Packs loose components into cohesive spawning layouts.
 * `#[derive(QueryData)]` – Maps fields directly to underlying raw archetype columns.
@@ -42,6 +43,11 @@ Enable the derive feature flag to unlock zero-cost data abstractions. The engine
 ### Extensibility Core
 * **prelude:** Re-exports standard primitives, queries, scheduling components, and primitives for everyday application usage.
 * **extensions:** Exposes low-level archetypal columns, access trackers, and execution handles for anyone to add on top of venix.
+
+### Feature flags 
+
+* `derive` - allows you to use the derives listed above.
+* `change-detection` - Enables change detection and tracking.
 
 ---
 

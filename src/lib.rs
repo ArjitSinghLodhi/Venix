@@ -29,7 +29,9 @@ pub mod prelude {
     pub use crate::derive::*;
     pub use crate::entity::Entity;
     pub use crate::events::*;
-    pub use crate::query::{changed::*, ergonomic_params::*, filter::*, query::*};
+    #[cfg(feature = "change-detection")]
+    pub use crate::query::changed::*;
+    pub use crate::query::{ergonomic_params::*, filter::*, query::*};
     pub use crate::resources::*;
     pub use crate::schedule::{DefaultSchedulesPlugin, schedule::*, schedules_list::*};
     pub use crate::system::validation::System;

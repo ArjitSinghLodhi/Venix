@@ -212,7 +212,7 @@ impl App {
     pub fn get_resource<T: 'static>(&self) -> &T {
         self.world.get_resource::<T>()
     }
-    
+
     pub fn get_resource_opt<T: 'static>(&self) -> Option<&T> {
         self.world.get_resource_opt::<T>()
     }

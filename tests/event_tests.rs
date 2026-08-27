@@ -192,7 +192,7 @@ rusty_fork_test! {
                     parallel_verification_system,
                 ),
             );
-    
+
         app.set_runner(test_two_frames);
         app.run();
     }
