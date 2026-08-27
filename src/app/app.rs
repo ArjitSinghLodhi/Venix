@@ -212,9 +212,17 @@ impl App {
     pub fn get_resource<T: 'static>(&self) -> &T {
         self.world.get_resource::<T>()
     }
+    
+    pub fn get_resource_opt<T: 'static>(&self) -> Option<&T> {
+        self.world.get_resource_opt::<T>()
+    }
 
     pub fn get_resource_mut<T: 'static>(&mut self) -> &mut T {
         self.world.get_resource_mut::<T>()
+    }
+
+    pub fn get_resource_mut_opt<T: 'static>(&mut self) -> Option<&mut T> {
+        self.world.get_resource_mut_opt::<T>()
     }
 
     pub fn pre_allocate_archetype<T: ComponentBundle>(&mut self) {

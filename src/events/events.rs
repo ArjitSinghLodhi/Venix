@@ -1,11 +1,7 @@
 use std::{
-    any::{Any, TypeId},
-    cell::UnsafeCell,
-    marker::PhantomData,
-    sync::{
-        RwLock,
-        atomic::{AtomicBool, Ordering},
-    },
+    any::{Any, TypeId}, cell::UnsafeCell, marker::PhantomData, ptr::NonNull, sync::{
+        Arc, RwLock, atomic::{AtomicBool, Ordering}
+    }
 };
 
 use thread_local::ThreadLocal;
@@ -74,7 +70,7 @@ pub(crate) struct EventQueue<T: 'static> {
 
 pub(crate) enum EventWriterOrigin<T: 'static + Send> {
     ThreadLocal(*const AtomicBool),
-    HeapFallback(*mut EventQueue<T>),
+    HeapFallback(NonNull<EventQueue<T>>),
 }
 
 pub(crate) struct EventLocalBufferSlot<T: 'static + Send> {
@@ -83,14 +79,14 @@ pub(crate) struct EventLocalBufferSlot<T: 'static + Send> {
 }
 
 pub(crate) struct EventBuffer<T: 'static + Send> {
-    pub(crate) master_queue: RwLock<EventQueue<T>>,
+    pub(crate) master_queue: Arc<RwLock<EventQueue<T>>>,
     pub(crate) local_buffers: ThreadLocal<EventLocalBufferSlot<T>>,
 }
 
 impl<T: 'static + Send> EventBuffer<T> {
     pub(crate) fn new() -> Self {
         EventBuffer {
-            master_queue: RwLock::new(EventQueue::new()),
+            master_queue: Arc::new(RwLock::new(EventQueue::new())),
             local_buffers: ThreadLocal::new(),
         }
     }
@@ -103,7 +99,7 @@ impl<T: 'static> EventQueue<T> {
 }
 
 pub struct EventWriter<'a, T: 'static + Send> {
-    pub(crate) local_data: *mut EventQueue<T>,
+    pub(crate) local_data: NonNull<EventQueue<T>>,
     pub(crate) origin: EventWriterOrigin<T>,
     pub(crate) master_buffer: *const EventBuffer<T>,
     pub(crate) generation: u8,
@@ -115,7 +111,7 @@ impl<'a, T: 'static + Send> EventWriter<'a, T> {
     #[inline]
     pub fn send(&mut self, event: T) {
         unsafe {
-            (*self.local_data)
+            self.local_data.as_mut()
                 .queue
                 .push(Event::new(event, self.generation, self.system_id));
         }
@@ -146,7 +142,7 @@ impl<'a, T: 'static + Send> SystemParam for EventWriter<'a, T> {
                 .is_ok()
             {
                 Self {
-                    local_data: slot.data.get(),
+                    local_data: NonNull::new_unchecked(slot.data.get()),
                     origin: EventWriterOrigin::ThreadLocal(&slot.is_busy as *const AtomicBool),
                     master_buffer: buffer_ptr,
                     generation: current_gen,
@@ -155,7 +151,7 @@ impl<'a, T: 'static + Send> SystemParam for EventWriter<'a, T> {
                 }
             } else {
                 let heap_box = Box::new(EventQueue::new());
-                let heap_ptr = Box::into_raw(heap_box);
+                let heap_ptr = NonNull::new_unchecked(Box::into_raw(heap_box));
                 Self {
                     local_data: heap_ptr,
                     origin: EventWriterOrigin::HeapFallback(heap_ptr),
@@ -172,7 +168,7 @@ impl<'a, T: 'static + Send> SystemParam for EventWriter<'a, T> {
 impl<'a, T: 'static + Send> Drop for EventWriter<'a, T> {
     fn drop(&mut self) {
         unsafe {
-            let local_vec = &mut *self.local_data;
+            let local_vec = self.local_data.as_mut();
             if !local_vec.queue.is_empty() {
                 let mut master_queue = (*self.master_buffer).master_queue.write().unwrap();
                 master_queue.queue.extend(local_vec.queue.drain(..));
@@ -183,7 +179,7 @@ impl<'a, T: 'static + Send> Drop for EventWriter<'a, T> {
                     (*is_busy_flag).store(false, Ordering::Relaxed);
                 }
                 EventWriterOrigin::HeapFallback(heap_ptr) => {
-                    let _cleanup = Box::from_raw(heap_ptr);
+                    let _cleanup = Box::from_raw(heap_ptr.as_ptr());
                 }
             }
         }
@@ -231,8 +227,8 @@ pub struct EventReader<'w, T: 'static + Send> {
     previous_gen: u8,
     current_gen: u8,
     reading_system_id: u32,
-    queue: *const EventBuffer<T>,
-    _marker: PhantomData<(&'w (), T)>,
+    queue: Arc<RwLock<EventQueue<T>>>, 
+    _marker: PhantomData<&'w EventBuffer<T>>,
 }
 
 impl<'w, T: 'static + Send> EventReader<'w, T> {
@@ -245,20 +241,18 @@ impl<'w, T: 'static + Send> EventReader<'w, T> {
         let previous_gen = self.previous_gen;
         let reading_sys_id = self.reading_system_id;
 
-        unsafe {
-            let guard = (&*self.queue).master_queue.read().unwrap();
+        let guard = self.queue.read().unwrap();
 
-            let iter = EventIterator {
-                _guard: guard,
-                index: 0,
-                current_gen,
-                system_last_gen,
-                previous_gen,
-                reading_sys_id,
-            };
+        let iter = EventIterator {
+            _guard: guard,
+            index: 0,
+            current_gen,
+            system_last_gen,
+            previous_gen,
+            reading_sys_id,
+        };
 
-            f(iter)
-        }
+        f(iter)
     }
 }
 
@@ -268,7 +262,8 @@ impl<'w, T: 'static + Send> SystemParam for EventReader<'w, T> {
     }
 
     fn extract(world: &mut World, system_data: &mut FunctionData) -> Self {
-        let event_queue_ptr = world.get_resource::<EventBuffer<T>>() as *const EventBuffer<T>;
+        let event_buffer_ref = world.get_resource::<EventBuffer<T>>();
+        let queue = event_buffer_ref.master_queue.clone();
 
         let current_gen = GenerationRing::current();
         let previous_gen = GenerationRing::previous(current_gen);
@@ -281,7 +276,7 @@ impl<'w, T: 'static + Send> SystemParam for EventReader<'w, T> {
             previous_gen,
             current_gen,
             reading_system_id,
-            queue: event_queue_ptr,
+            queue,
             _marker: PhantomData,
         }
     }

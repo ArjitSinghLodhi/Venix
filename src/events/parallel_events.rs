@@ -1,7 +1,5 @@
 use std::{
-    cell::UnsafeCell,
-    marker::PhantomData,
-    sync::atomic::{AtomicBool, Ordering},
+    cell::UnsafeCell, marker::PhantomData, ptr::NonNull, sync::atomic::{AtomicBool, Ordering}
 };
 
 use crate::{
@@ -43,7 +41,7 @@ impl<'w, T: 'static + Send> ParallelEventWriter<'w, T> {
                 .is_ok()
             {
                 EventWriter {
-                    local_data: slot.data.get(),
+                    local_data: NonNull::new_unchecked(slot.data.get()),
                     origin: EventWriterOrigin::ThreadLocal(&slot.is_busy as *const AtomicBool),
                     master_buffer: self.master_buffer,
                     generation: self.generation,
@@ -52,7 +50,7 @@ impl<'w, T: 'static + Send> ParallelEventWriter<'w, T> {
                 }
             } else {
                 let heap_box = Box::new(EventQueue::new());
-                let heap_ptr = Box::into_raw(heap_box);
+                let heap_ptr = NonNull::new_unchecked(Box::into_raw(heap_box));
 
                 EventWriter {
                     local_data: heap_ptr,

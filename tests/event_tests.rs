@@ -177,23 +177,21 @@ fn test_two_frames(app: &mut App) {
     app.update();
 }
 
-rusty_fork_test! {
-    #[test]
-    fn test_events_parallel_lifecycle() {
-        let mut app = App::new();
-        app.add_plugins(DefaultSchedulesPlugin)
-            .insert_resource(FrameCounter { current_frame: 0 })
-            .init_event::<ThreatEvent>()
-            .add_systems(
-                Update::id(),
-                (
-                    increment_frame_system,
-                    parallel_execution_system,
-                    parallel_verification_system,
-                ),
-            );
+#[test]
+fn test_events_parallel_lifecycle() {
+    let mut app = App::new();
+    app.add_plugins(DefaultSchedulesPlugin)
+        .insert_resource(FrameCounter { current_frame: 0 })
+        .init_event::<ThreatEvent>()
+        .add_systems(
+            Update::id(),
+            (
+                increment_frame_system,
+                parallel_execution_system,
+                parallel_verification_system,
+            ),
+        );
 
-        app.set_runner(test_two_frames);
-        app.run();
-    }
+    app.set_runner(test_two_frames);
+    app.run();
 }
