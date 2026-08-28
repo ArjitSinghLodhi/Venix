@@ -1,9 +1,7 @@
-use crate::system::validation::FunctionGenerationData;
 use crate::system::validation::FunctionSystem;
 use crate::system::validation::IntoSystem;
 use crate::system::validation::System;
 use crate::system::validation::SystemParam;
-use crate::world::storage::GenerationRing;
 use crate::world::storage::World;
 macro_rules! impl_system_for_functions {
     ($($var:ident : $param:ident),*) => {
@@ -14,13 +12,6 @@ macro_rules! impl_system_for_functions {
          {
     fn run(&mut self, world: &mut World) {
         let system_data = &mut self.data;
-        let generation_data = system_data.get_data_mut::<FunctionGenerationData>().unwrap();
-        let world_gen = GenerationRing::current();
-        if generation_data.current_run_generation != world_gen {
-            generation_data.last_run_generation = generation_data.current_run_generation;
-            generation_data.current_run_generation = world_gen;
-        }
-
         $(
             let $var = <$param>::extract(world, system_data);
         )*
@@ -82,9 +73,7 @@ macro_rules! impl_system_for_functions {
                         }
                     }
                 }
-                let mut func = FunctionSystem::new(self);
-                func.data.insert(FunctionGenerationData::new());
-                func
+                FunctionSystem::new(self)
             }
         }
     };

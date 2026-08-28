@@ -209,39 +209,58 @@ fn post_mutation_verify_system(
 
     if counter.current_frame == 2 {
         assert_eq!(
-            pos_changes, 1,
-            "❌ Core Failure: Post-mutator failed to catch inline Changed Filter Position alteration on Frame 2!"
+            pos_changes, 0,
+            "❌ Buffer Break: Post-mutator caught an immediate inline Changed Filter Position alteration on Frame 2!"
         );
         assert_eq!(
-            vel_changes, 1,
-            "❌ Core Failure: Post-mutator failed to catch inline Changed Filter Velocity alteration on Frame 2!"
+            vel_changes, 0,
+            "❌ Buffer Break: Post-mutator caught an immediate inline Changed Filter Velocity alteration on Frame 2!"
         );
         assert_eq!(
-            pos_tracker_changes, 1,
-            "❌ Core Failure: Post-mutator failed to catch inline ChangedTracker Position alteration on Frame 2!"
+            pos_tracker_changes, 0,
+            "❌ Buffer Break: Post-mutator caught an immediate inline ChangedTracker Position alteration on Frame 2!"
         );
         assert_eq!(
-            vel_tracker_changes, 1,
-            "❌ Core Failure: Post-mutator failed to catch inline ChangedTracker Velocity alteration on Frame 2!"
+            vel_tracker_changes, 0,
+            "❌ Buffer Break: Post-mutator caught an immediate inline ChangedTracker Velocity alteration on Frame 2!"
         );
     }
 
     if counter.current_frame == 3 {
         assert_eq!(
+            pos_changes, 1,
+            "❌ Pipeline Leak: Post-mutator failed to detect historical Changed Filter Position change on Frame 3!"
+        );
+        assert_eq!(
+            vel_changes, 1,
+            "❌ Pipeline Leak: Post-mutator failed to detect historical Changed Filter Velocity change on Frame 3!"
+        );
+        assert_eq!(
+            pos_tracker_changes, 1,
+            "❌ Pipeline Leak: Post-mutator failed to detect historical ChangedTracker Position change on Frame 3!"
+        );
+        assert_eq!(
+            vel_tracker_changes, 1,
+            "❌ Pipeline Leak: Post-mutator failed to detect historical ChangedTracker Velocity change on Frame 3!"
+        );
+    }
+
+    if counter.current_frame == 4 {
+        assert_eq!(
             pos_changes, 0,
-            "❌ Tracking Error: Post-system leaked Changed Filter Position change into Frame 3 (should stagnate)."
+            "❌ Tracking Error: Post-system leaked Changed Filter Position change into Frame 4 (should stagnate)."
         );
         assert_eq!(
             vel_changes, 0,
-            "❌ Tracking Error: Post-system leaked Changed Filter Velocity change into Frame 3 (should stagnate)."
+            "❌ Tracking Error: Post-system leaked Changed Filter Velocity change into Frame 4 (should stagnate)."
         );
         assert_eq!(
             pos_tracker_changes, 0,
-            "❌ Tracking Error: Post-system leaked ChangedTracker Position change into Frame 3 (should stagnate)."
+            "❌ Tracking Error: Post-system leaked ChangedTracker Position change into Frame 4 (should stagnate)."
         );
         assert_eq!(
             vel_tracker_changes, 0,
-            "❌ Tracking Error: Post-system leaked ChangedTracker Velocity change into Frame 3 (should stagnate)."
+            "❌ Tracking Error: Post-system leaked ChangedTracker Velocity change into Frame 4 (should stagnate)."
         );
     }
 }
@@ -292,28 +311,35 @@ fn modify_component_system(mut query: Query<&mut Position>) {
     }
 }
 
-fn verify_change_tracking(query: Query<&Position, Changed<Position>>) {
-    let mut change_detected = false;
-    for view in query.iter() {
-        for pos in view.iter() {
-            if pos.x == 50.0 {
-                change_detected = true;
+fn verify_change_tracking(frame: Res<FrameCounter>, query: Query<&Position, Changed<Position>>) {
+    if frame.current_frame == 2 {
+        let mut change_detected = false;
+        for view in query.iter() {
+            for pos in view.iter() {
+                if pos.x == 50.0 {
+                    change_detected = true;
+                }
             }
         }
+        assert!(change_detected);
     }
-    assert!(change_detected);
 }
 
-fn verify_change_tracking_data(query: Query<(&Position, ChangedTracker<Velocity>)>) {
-    let mut change_detected_track = false;
-    for view in query.iter() {
-        for (pos, mark) in view.iter() {
-            if pos.x == 50.0 && !mark.is_changed() {
-                change_detected_track = true;
+fn verify_change_tracking_data(
+    frame: Res<FrameCounter>,
+    query: Query<(&Position, ChangedTracker<Velocity>)>,
+) {
+    if frame.current_frame == 2 {
+        let mut change_detected_track = false;
+        for view in query.iter() {
+            for (pos, mark) in view.iter() {
+                if pos.x == 50.0 && !mark.is_changed() {
+                    change_detected_track = true;
+                }
             }
         }
+        assert!(change_detected_track);
     }
-    assert!(change_detected_track);
 }
 
 rusty_fork_test! {
@@ -321,10 +347,11 @@ rusty_fork_test! {
     fn test_changed_generational_tracking() {
         let mut app = App::new();
         app.add_plugins(DefaultSchedulesPlugin)
+            .insert_resource(FrameCounter {current_frame: 0})
             .add_systems(Startup::id(), spawn_tracking_entity)
             .add_systems(
                 Update::id(),
-                (modify_component_system, verify_change_tracking, verify_change_tracking_data),
+                (increment_frame_system, modify_component_system, verify_change_tracking, verify_change_tracking_data),
             );
 
         app.set_runner(test_runner_once);
@@ -335,5 +362,7 @@ rusty_fork_test! {
 fn test_runner_once(app: &mut App) {
     app.build();
     app.run_startup();
+    app.update();
+    app.update();
     app.update();
 }

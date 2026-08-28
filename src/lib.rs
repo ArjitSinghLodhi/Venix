@@ -1,5 +1,7 @@
 pub mod app;
 pub mod commands;
+#[cfg(feature = "reactivity")]
+pub mod detection;
 pub mod entity;
 pub mod events;
 pub mod query;
@@ -27,10 +29,10 @@ pub mod prelude {
     pub use crate::commands::{Commands, ParallelCommands, bundle::ComponentBundle};
     #[cfg(feature = "derive")]
     pub use crate::derive::*;
+    #[cfg(feature = "reactivity")]
+    pub use crate::detection::{added::*, changed::*};
     pub use crate::entity::Entity;
     pub use crate::events::*;
-    #[cfg(feature = "change-detection")]
-    pub use crate::query::changed::*;
     pub use crate::query::{ergonomic_params::*, filter::*, query::*};
     pub use crate::resources::*;
     pub use crate::schedule::{DefaultSchedulesPlugin, schedule::*, schedules_list::*};

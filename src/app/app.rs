@@ -15,7 +15,7 @@ use crate::{
         schedule::{IntoScheduleId, Schedule, ScheduleId, ScheduleLabel, SchedulePlace},
         schedules_list::Startup,
     },
-    system::validation::{FunctionGenerationData, IntoSystemConfigs, System},
+    system::validation::{IntoSystemConfigs, System, SystemId},
     world::storage::World,
 };
 
@@ -151,9 +151,9 @@ impl App {
         self
     }
 
-    pub fn init_event<T: 'static + Send>(&mut self) -> &mut Self {
+    pub fn init_event<T: 'static + Send + Sync>(&mut self) -> &mut Self {
         self.configuration.not_ready();
-        if let None = self.world.get_resource_opt::<EventBuffer<T>>() {
+        if self.world.get_resource_opt::<EventBuffer<T>>().is_none() {
             self.world.insert_resource(EventBuffer::<T>::new());
         } else {
             panic!("Event: {} Already initialized", type_name::<T>())
@@ -285,9 +285,7 @@ impl App {
                 }
             };
 
-            target_schedule
-                .systems
-                .extend(system_block.systems.into_iter());
+            target_schedule.systems.extend(system_block.systems);
         }
         let mut running_system_offset: u32 = 0;
 
@@ -295,9 +293,8 @@ impl App {
             for (system_idx, sys) in target_schedule.systems.iter_mut().enumerate() {
                 let absolute_system_id = running_system_offset + (system_idx as u32);
 
-                let data =
-                    sys.get_or_init_mut::<FunctionGenerationData>(|| FunctionGenerationData::new());
-                data.system_id = absolute_system_id;
+                let data = sys.get_or_init_mut::<SystemId>(|| SystemId::new(0));
+                data.id = absolute_system_id;
             }
             running_system_offset += target_schedule.systems.len() as u32;
         }

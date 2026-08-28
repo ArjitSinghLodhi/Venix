@@ -9,7 +9,7 @@ use std::{
 };
 
 use fxhash::{FxBuildHasher, FxHashMap, FxHashSet};
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use thread_local::ThreadLocal;
 
 use crate::{
@@ -26,8 +26,8 @@ use crate::{
     },
 };
 
-#[cfg(feature = "change-detection")]
-use crate::query::changed::TRACKED_COMPONENTS;
+#[cfg(feature = "reactivity")]
+use crate::detection::TRACKED_COMPONENTS;
 
 pub(crate) struct SpawnCommand<T: ComponentBundle> {
     pub(crate) components: T,
@@ -48,7 +48,7 @@ impl<T: ComponentBundle + Send> WorldCommand for SpawnCommand<T> {
 
         arch.entities.push(Entity::new(assigned_registry_idx));
         self.components.push_to_archetype(arch);
-        #[cfg(feature = "change-detection")]
+        #[cfg(feature = "reactivity")]
         unsafe {
             let columns = &mut *arch.columns.get();
             initialize_spawn_markers(columns);
@@ -151,25 +151,17 @@ impl<T: ComponentBundle + Send> WorldCommand for AddComponentsCommand<T> {
                 if new_cols.is_empty() {
                     T::create_empty_columns(new_cols);
                     clone_existing_columns(old_cols, new_cols);
-                    #[cfg(feature = "change-detection")]
+                    #[cfg(feature = "reactivity")]
                     initialize_missing_archetype_markers(&new_arch.types, new_cols);
                 }
                 move_matching_columns(old_cols, new_cols, old_idx as usize);
             }
             let new_dense_idx = new_arch.entities.len() as u32;
             self.components.push_to_archetype(new_arch);
-            #[cfg(feature = "change-detection")]
+            #[cfg(feature = "reactivity")]
             {
-                let fresh_old_cols = &mut *old_arch.columns.get();
                 let fresh_new_cols = &mut *new_arch.columns.get();
-
-                migrate_addition_markers(
-                    &old_arch.types,
-                    old_idx as usize,
-                    incoming_ids,
-                    fresh_old_cols,
-                    fresh_new_cols,
-                );
+                migrate_addition_markers(&old_arch.types, incoming_ids, fresh_new_cols);
             }
             swap_remove_entity_registry_update(old_arch, old_idx);
             let entity_handle = old_arch.entities.swap_remove(old_idx as usize);
@@ -222,7 +214,7 @@ impl<T: ComponentBundle + Send> WorldCommand for InsertComponentsCommand<T> {
                 if new_cols.is_empty() {
                     T::create_empty_columns(new_cols);
                     clone_existing_columns(old_cols, new_cols);
-                    #[cfg(feature = "change-detection")]
+                    #[cfg(feature = "reactivity")]
                     initialize_missing_archetype_markers(&new_arch.types, new_cols);
                 }
 
@@ -231,18 +223,10 @@ impl<T: ComponentBundle + Send> WorldCommand for InsertComponentsCommand<T> {
             self.components
                 .insert_to_archetype(new_arch, new_dense_idx as usize);
 
-            #[cfg(feature = "change-detection")]
+            #[cfg(feature = "reactivity")]
             {
-                let fresh_old_cols = &mut *old_arch.columns.get();
                 let fresh_new_cols = &mut *new_arch.columns.get();
-
-                migrate_addition_markers(
-                    &old_arch.types,
-                    old_idx as usize,
-                    incoming_ids,
-                    fresh_old_cols,
-                    fresh_new_cols,
-                );
+                migrate_addition_markers(&old_arch.types, incoming_ids, fresh_new_cols);
             }
 
             swap_remove_entity_registry_update(old_arch, old_idx);
@@ -288,7 +272,7 @@ impl<T: ComponentBundle + Send> WorldCommand for RemoveComponentsCommand<T> {
             move_matching_columns(old_cols, new_cols, old_idx as usize);
             erase_subtracted_columns(removed_ids, old_cols, old_idx as usize);
 
-            #[cfg(feature = "change-detection")]
+            #[cfg(feature = "reactivity")]
             erase_subtracted_markers(&old_arch.types, &new_arch.types, old_cols, old_idx as usize);
 
             swap_remove_entity_registry_update(old_arch, old_idx);
@@ -370,7 +354,7 @@ fn create_addition_archetype<T: ComponentBundle>(
         new_types.insert(*id);
     }
 
-    #[cfg(feature = "change-detection")]
+    #[cfg(feature = "reactivity")]
     world
         .archetypes_manager
         .sync_tracking_markers(&mut new_types);
@@ -396,10 +380,10 @@ fn create_subtraction_archetype<T: ComponentBundle>(
         .unwrap();
     let mut new_types = old_arch.types.clone();
     for id in removed_ids {
-        new_types.remove(id);
+        new_types.swap_remove(id);
     }
 
-    #[cfg(feature = "change-detection")]
+    #[cfg(feature = "reactivity")]
     world
         .archetypes_manager
         .sync_tracking_markers(&mut new_types);
@@ -432,7 +416,7 @@ fn clone_existing_columns(
 
 #[inline(always)]
 fn populate_subtracted_columns(
-    allowed_types: &FxHashSet<TypeId>,
+    allowed_types: &IndexSet<TypeId, FxBuildHasher>,
     src: &IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
     dst: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
 ) {
@@ -487,7 +471,7 @@ unsafe fn swap_remove_entity_registry_update(arch: &mut Archetype, removed_row_i
     }
 }
 
-#[cfg(feature = "change-detection")]
+#[cfg(feature = "reactivity")]
 #[inline(always)]
 fn initialize_spawn_markers(columns: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>) {
     let tracked = TRACKED_COMPONENTS.read().unwrap();
@@ -498,10 +482,10 @@ fn initialize_spawn_markers(columns: &mut IndexMap<TypeId, ComponentColumn, FxBu
     }
 }
 
-#[cfg(feature = "change-detection")]
+#[cfg(feature = "reactivity")]
 #[inline(always)]
 fn initialize_missing_archetype_markers(
-    types: &FxHashSet<TypeId>,
+    types: &IndexSet<TypeId, FxBuildHasher>,
     columns: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
 ) {
     let tracked = TRACKED_COMPONENTS.read().unwrap();
@@ -512,25 +496,18 @@ fn initialize_missing_archetype_markers(
     }
 }
 
-#[cfg(feature = "change-detection")]
+#[cfg(feature = "reactivity")]
 #[inline(always)]
 unsafe fn migrate_addition_markers(
-    old_types: &FxHashSet<TypeId>,
-    row_idx: usize,
+    old_types: &IndexSet<TypeId, FxBuildHasher>,
     incoming_ids: &[TypeId],
-    old_cols: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
     new_cols: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
 ) {
     let tracked = TRACKED_COMPONENTS.read().unwrap();
     for meta in tracked.iter() {
         if new_cols.contains_key(&meta.marker_id) {
-            if old_types.contains(&meta.marker_id) && old_cols.contains_key(&meta.marker_id) {
-                if let Some(old_marker_col) = old_cols.get_mut(&meta.marker_id)
-                    && let Some(new_marker_col) = new_cols.get_mut(&meta.marker_id)
-                {
-                    let dst_ptr = &mut *new_marker_col.data as *mut dyn AnyColumn;
-                    unsafe { old_marker_col.data.move_row_erased(row_idx, dst_ptr) };
-                }
+            if old_types.contains(&meta.marker_id) {
+                continue;
             } else if incoming_ids.contains(&meta.component_id)
                 && let Some(marker_column) = new_cols.get_mut(&meta.marker_id)
             {
@@ -540,11 +517,11 @@ unsafe fn migrate_addition_markers(
     }
 }
 
-#[cfg(feature = "change-detection")]
+#[cfg(feature = "reactivity")]
 #[inline(always)]
 unsafe fn erase_subtracted_markers(
-    old_types: &FxHashSet<TypeId>,
-    new_types: &FxHashSet<TypeId>,
+    old_types: &IndexSet<TypeId, FxBuildHasher>,
+    new_types: &IndexSet<TypeId, FxBuildHasher>,
     old_cols: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
     row_idx: usize,
 ) {
@@ -641,7 +618,7 @@ impl Commands<'_> {
     where
         F: for<'b> FnMut(&'b Entity),
     {
-        let buff = (*self.master_buffer).data.read().unwrap();
+        let buff = self.master_buffer.data.read().unwrap();
         for cmd in buff.despawns.iter() {
             f(cmd.despawn_target())
         }
@@ -719,7 +696,7 @@ impl<'a> Drop for Commands<'a> {
         unsafe {
             let data_ref = self.local_data.as_mut();
             if !data_ref.queue.is_empty() || !data_ref.despawns.is_empty() {
-                let mut master_data = (*self.master_buffer).data.write().unwrap();
+                let mut master_data = self.master_buffer.data.write().unwrap();
 
                 if !data_ref.queue.is_empty() {
                     master_data.queue.merge(&mut data_ref.queue);

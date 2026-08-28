@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct ParallelCommands {
-    pub(crate) master_buffer_ptr: Arc<CommandBuffer>,
+    pub(crate) master_buffer: Arc<CommandBuffer>,
 }
 
 unsafe impl Send for ParallelCommands {}
@@ -23,7 +23,7 @@ impl SystemParam for ParallelCommands {
 
     fn extract(world: &mut World, _data: &mut FunctionData) -> Self {
         Self {
-            master_buffer_ptr: Arc::clone(&world.commands),
+            master_buffer: Arc::clone(&world.commands),
         }
     }
 }
@@ -33,7 +33,7 @@ impl ParallelCommands {
     where
         F: for<'b> FnOnce(Commands<'b>) -> R,
     {
-        let slot = (*self.master_buffer_ptr).local_data.get_or(|| LocalSlot {
+        let slot = self.master_buffer.local_data.get_or(|| LocalSlot {
             is_busy: AtomicBool::new(false),
             data: UnsafeCell::new(CommandsBufferData::new()),
         });
@@ -46,7 +46,7 @@ impl ParallelCommands {
             let commands = Commands {
                 local_data: unsafe { NonNull::new_unchecked(slot.data.get()) },
                 origin: CommandsOrigin::ThreadLocal(&slot.is_busy as *const AtomicBool),
-                master_buffer: self.master_buffer_ptr.clone(),
+                master_buffer: self.master_buffer.clone(),
                 _marker: std::marker::PhantomData,
             };
             f(commands)
@@ -57,7 +57,7 @@ impl ParallelCommands {
             let commands = Commands {
                 local_data: heap_ptr,
                 origin: CommandsOrigin::HeapFallback(heap_ptr),
-                master_buffer: self.master_buffer_ptr.clone(),
+                master_buffer: self.master_buffer.clone(),
                 _marker: std::marker::PhantomData,
             };
             f(commands)

@@ -17,15 +17,15 @@ A deterministic, high-concurrency Entity Component System written in Rust. Venix
 
 ## ⚠️ State Evolution Lifecycle Constraints
 
-Venix tracks runtime data modifications through an explicit generational bitmask pipeline.
+Venix tracks runtime data modifications through an explicit buffer pipeline.
 
-**Operational Rule:** Any structural property change or mutable access evaluated via the Changed filter remains valid for a window of exactly 2 execution frames.
+**Operational Rule:** Any structural property change or mutable access evaluated via the Changed or Added filter remains valid for a window of exactly 1 execution frame.
 
-* **Generation Frame N:** Data properties are altered. An internal tracker initializes the change token.
-* **Generation Frame N+1:** The modification state is actively maintained. This allows downstream filtered queries to identify and react to the change event.
-* **Generation Frame N+2:** The generation counter shifts. The modification token is overwritten or reset, and its visibility is dropped.
+* **Generation Frame N:** Data properties are altered. An internal tracker initializes the change token but it is Not visible yet.
+* **Generation Frame N+1:** The buffers are swapped and modification state is visible. This allows filtered queries to identify and react to the change.
+* **Generation Frame N+2:** The modification token is overwritten, and its visibility is dropped.
 
-Note: All logic tracking changes via Changed filters must execute within this 2-frame boundary. If custom runner architectures delay system dispatch past this window, the mutation visibility is lost.
+Note: All logic tracking changes via Changed filters must execute within this 1-frame boundary. If custom runner architectures delay system dispatch past this window, the mutation visibility is lost.
 
 ---
 
@@ -47,7 +47,7 @@ Available through the feature flag `derive`.
 ### Feature flags 
 
 * `derive` - allows you to use the derives listed above.
-* `change-detection` - Enables change detection and tracking.
+* `reactivity` - Enables change and added detection tracking.
 
 ---
 

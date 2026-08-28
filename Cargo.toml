@@ -1,6 +1,6 @@
 [package]
 name = "venix"
-version = "1.2.9"
+version = "2.0.0"
 edition = "2024"
 description = "A high-performance, archetype-based ECS engine written in Rust."
 readme = "README.md"
@@ -10,11 +10,12 @@ keywords = ["ecs", "archetype", "simulation", "parallel"]
 categories = ["game-engines", "development-tools"]
 
 [dependencies]
-venix_macros = {version = "1.0.2", optional = true }
+venix_macros = { version = "1.0.3", optional = true }
 fxhash = "0.2.1"
 indexmap = "2.14.0"
 rayon = "1.12.0"
 thread_local = "1.1.10"
+orx-concurrent-bag = "4.0.1"
 
 [dev-dependencies]
 rusty-fork = "0.3.1"
@@ -39,9 +40,14 @@ required-features = ["derive"]
 [[test]]
 name = "change_track_test"
 path = "tests/changed_tracking_test.rs"
-required-features = ["change-detection"]
+required-features = ["reactivity"]
+
+[[test]]
+name = "added_tracking_test"
+path = "tests/added_tracking_test.rs"
+required-features = ["reactivity"]
 
 [features]
 default = []
 derive = ["dep:venix_macros"]
-change-detection = []
+reactivity = []

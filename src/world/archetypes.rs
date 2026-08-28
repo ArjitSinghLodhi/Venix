@@ -4,13 +4,13 @@ use std::{
     hash::{BuildHasher, Hash},
 };
 
-use fxhash::{FxBuildHasher, FxHashMap, FxHashSet};
+use fxhash::{FxBuildHasher, FxHashMap};
 use indexmap::{IndexMap, IndexSet};
 
 use crate::{commands::bundle::ComponentBundle, entity::Entity};
 
-#[cfg(feature = "change-detection")]
-use crate::query::changed::TRACKED_COMPONENTS;
+#[cfg(feature = "reactivity")]
+use crate::detection::TRACKED_COMPONENTS;
 
 pub(crate) trait AnyColumn: Any {
     unsafe fn swap_remove_erased(&mut self, idx: usize);
@@ -55,7 +55,7 @@ pub struct ComponentColumn {
 
 pub struct Archetype {
     pub(crate) id: ArchetypeId,
-    pub(crate) types: FxHashSet<TypeId>,
+    pub(crate) types: IndexSet<TypeId, FxBuildHasher>,
     pub(crate) entities: Vec<Entity>,
     pub(crate) columns: UnsafeCell<IndexMap<TypeId, ComponentColumn, FxBuildHasher>>,
     pub(crate) type_names: IndexSet<&'static str, FxBuildHasher>,
@@ -67,7 +67,7 @@ unsafe impl Send for Archetype {}
 impl Archetype {
     pub(crate) fn new(
         id: ArchetypeId,
-        types: FxHashSet<TypeId>,
+        types: IndexSet<TypeId, FxBuildHasher>,
         columns: IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
         type_names: IndexSet<&'static str, FxBuildHasher>,
     ) -> Self {
@@ -120,7 +120,7 @@ impl ArchetypeManager {
         }
     }
 
-    fn calculate_hash(&self, types: &FxHashSet<TypeId>) -> u64 {
+    fn calculate_hash(&self, types: &IndexSet<TypeId, FxBuildHasher>) -> u64 {
         let mut combined_hash: u64 = 0;
         let hasher_builder = self.index.hasher();
         for type_id in types {
@@ -129,14 +129,14 @@ impl ArchetypeManager {
         combined_hash
     }
 
-    #[cfg(feature = "change-detection")]
-    pub(crate) fn sync_tracking_markers(&self, types: &mut FxHashSet<TypeId>) {
+    #[cfg(feature = "reactivity")]
+    pub(crate) fn sync_tracking_markers(&self, types: &mut IndexSet<TypeId, FxBuildHasher>) {
         if let Ok(tracked) = TRACKED_COMPONENTS.read() {
             for meta in tracked.iter() {
                 if types.contains(&meta.component_id) {
                     types.insert(meta.marker_id);
                 } else {
-                    types.remove(&meta.marker_id);
+                    types.swap_remove(&meta.marker_id);
                 }
             }
         }
@@ -153,7 +153,7 @@ impl ArchetypeManager {
             target_types.insert(*id);
         }
 
-        #[cfg(feature = "change-detection")]
+        #[cfg(feature = "reactivity")]
         self.sync_tracking_markers(&mut target_types);
 
         let hash = self.calculate_hash(&target_types);
@@ -168,10 +168,10 @@ impl ArchetypeManager {
         let old_arch = self.archetypes.get(&old_id)?;
         let mut target_types = old_arch.types.clone();
         for id in removed_ids {
-            target_types.remove(id);
+            target_types.swap_remove(id);
         }
 
-        #[cfg(feature = "change-detection")]
+        #[cfg(feature = "reactivity")]
         self.sync_tracking_markers(&mut target_types);
 
         let hash = self.calculate_hash(&target_types);
@@ -180,7 +180,7 @@ impl ArchetypeManager {
 
     pub(crate) fn get_or_create_from_set(
         &mut self,
-        types_set: FxHashSet<TypeId>,
+        types_set: IndexSet<TypeId, FxBuildHasher>,
         types_names_set: IndexSet<&'static str, FxBuildHasher>,
     ) -> ArchetypeId {
         let order_independent_hash = self.calculate_hash(&types_set);
@@ -202,12 +202,12 @@ impl ArchetypeManager {
     pub(crate) fn get_or_create_from_generic<T: ComponentBundle>(&mut self) -> ArchetypeId {
         let incoming_ids = T::get_type_ids();
         let mut types_set =
-            FxHashSet::with_capacity_and_hasher(incoming_ids.len(), FxBuildHasher::default());
+            IndexSet::with_capacity_and_hasher(incoming_ids.len(), FxBuildHasher::default());
         for &id in incoming_ids {
             types_set.insert(id);
         }
 
-        #[cfg(feature = "change-detection")]
+        #[cfg(feature = "reactivity")]
         self.sync_tracking_markers(&mut types_set);
 
         let order_independent_hash = self.calculate_hash(&types_set);
@@ -229,7 +229,7 @@ impl ArchetypeManager {
         let mut columns = IndexMap::with_hasher(FxBuildHasher::default());
         T::create_empty_columns(&mut columns);
 
-        #[cfg(feature = "change-detection")]
+        #[cfg(feature = "reactivity")]
         if let Ok(tracked) = TRACKED_COMPONENTS.read() {
             let marker_columns: Vec<_> = tracked
                 .iter()

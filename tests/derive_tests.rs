@@ -70,7 +70,7 @@ fn verify_and_mutate_macros(mut tools: CompositeSystemParam) {
 
     for mut view in tools.query.iter_mut() {
         matched_entities += view.len();
-        #[cfg(feature = "change-detection")]
+        #[cfg(feature = "reactivity")]
         for mut entity in view.iter_mut() {
             entity.vel.x += 10.0;
             entity.vel.y += 10.0;
@@ -79,7 +79,7 @@ fn verify_and_mutate_macros(mut tools: CompositeSystemParam) {
             assert_eq!(entity.vel.x, 12.0);
             assert_eq!(entity.vel.y, 12.0);
         }
-        #[cfg(not(feature = "change-detection"))]
+        #[cfg(not(feature = "reactivity"))]
         for entity in view.iter_mut() {
             entity.vel.x += 10.0;
             entity.vel.y += 10.0;

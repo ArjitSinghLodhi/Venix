@@ -1,18 +1,17 @@
+use fxhash::FxBuildHasher;
+use indexmap::IndexSet;
 use std::any::TypeId;
 
-use fxhash::FxHashSet;
-
+#[cfg(feature = "reactivity")]
+use crate::{
+    detection::changed::{ChangedMarker, Mut},
+    world::storage::CurrentBufferIdx,
+};
 use crate::{
     entity::Entity,
     query::query::QueryData,
     system::validation::{AccessVec, FunctionData},
     world::archetypes::Archetype,
-};
-#[cfg(feature = "change-detection")]
-use crate::{
-    query::changed::{ChangedMarker, Mut},
-    system::validation::FunctionGenerationData,
-    world::storage::GenerationRing,
 };
 
 impl<T: 'static> QueryData for &T {
@@ -20,7 +19,7 @@ impl<T: 'static> QueryData for &T {
     type ReadOnlyItem<'w> = &'w T;
     type Fetch = *const T;
 
-    fn matches(types: &FxHashSet<TypeId>) -> bool {
+    fn matches(types: &IndexSet<TypeId, FxBuildHasher>) -> bool {
         types.contains(&TypeId::of::<T>())
     }
     fn collect_access(
@@ -40,20 +39,18 @@ impl<T: 'static> QueryData for &T {
     }
 }
 
-#[cfg(not(feature = "change-detection"))]
+#[cfg(not(feature = "reactivity"))]
 impl<T: 'static> QueryData for &mut T {
     type Item<'w> = &'w mut T;
     type ReadOnlyItem<'w> = &'w T;
     type Fetch = *mut T;
 
-    fn matches(types: &FxHashSet<TypeId>) -> bool {
+    fn matches(types: &IndexSet<TypeId, FxBuildHasher>) -> bool {
         types.contains(&TypeId::of::<T>())
     }
 
     unsafe fn init_fetch(archetype: &Archetype, _data: &mut FunctionData) -> Self::Fetch {
-        unsafe {
-            (*archetype.fetch_column_raw::<T>()).as_mut_ptr()
-        }
+        unsafe { (*archetype.fetch_column_raw::<T>()).as_mut_ptr() }
     }
 
     #[inline(always)]
@@ -70,27 +67,22 @@ impl<T: 'static> QueryData for &mut T {
     }
 }
 
-#[cfg(feature = "change-detection")]
+#[cfg(feature = "reactivity")]
 impl<T: 'static> QueryData for &mut T {
     type Item<'w> = Mut<'w, T>;
     type ReadOnlyItem<'w> = &'w T;
-    type Fetch = (*mut T, *mut ChangedMarker<T>, u8, u32, bool);
+    type Fetch = (*mut T, *mut ChangedMarker<T>, u8, bool);
 
-    fn matches(types: &FxHashSet<TypeId>) -> bool {
+    fn matches(types: &IndexSet<TypeId, FxBuildHasher>) -> bool {
         types.contains(&TypeId::of::<T>())
     }
 
-    unsafe fn init_fetch(archetype: &Archetype, data: &mut FunctionData) -> Self::Fetch {
+    unsafe fn init_fetch(archetype: &Archetype, _data: &mut FunctionData) -> Self::Fetch {
         unsafe {
             let data_ptr = (*archetype.fetch_column_raw::<T>()).as_mut_ptr();
             let columns = &mut *archetype.columns.get();
             let marker_id = TypeId::of::<ChangedMarker<T>>();
-            let generation_data = data
-                .get_data::<FunctionGenerationData>()
-                .expect("Missing FunctionGenerationData on mutable component query fetch");
-
-            let system_id = generation_data.system_id;
-            let current_generation = GenerationRing::current();
+            let current_write_idx = CurrentBufferIdx::current_write_idx();
 
             if let Some(column) = columns.get_mut(&marker_id) {
                 let vec_ptr = column
@@ -99,21 +91,9 @@ impl<T: 'static> QueryData for &mut T {
                     .downcast_mut::<Vec<ChangedMarker<T>>>()
                     .unwrap();
 
-                (
-                    data_ptr,
-                    vec_ptr.as_mut_ptr(),
-                    current_generation,
-                    system_id,
-                    true,
-                )
+                (data_ptr, vec_ptr.as_mut_ptr(), current_write_idx, true)
             } else {
-                (
-                    data_ptr,
-                    std::ptr::null_mut(),
-                    current_generation,
-                    system_id,
-                    false,
-                )
+                (data_ptr, std::ptr::null_mut(), current_write_idx, false)
             }
         }
     }
@@ -124,9 +104,8 @@ impl<T: 'static> QueryData for &mut T {
             Mut {
                 value: fetch.0.add(index),
                 marker: fetch.1.add(index),
-                generation: fetch.2,
-                system_id: fetch.3,
-                should_modify: fetch.4,
+                current_write_idx: fetch.2,
+                should_modify: fetch.3,
                 _marker: std::marker::PhantomData,
             }
         }
@@ -147,7 +126,7 @@ impl QueryData for Entity {
     type ReadOnlyItem<'w> = &'w Entity;
     type Fetch = *const Entity;
 
-    fn matches(_types: &FxHashSet<TypeId>) -> bool {
+    fn matches(_types: &IndexSet<TypeId, FxBuildHasher>) -> bool {
         true
     }
     fn collect_access(_reads: &mut AccessVec<TypeId>, _writes: &mut AccessVec<TypeId>) {}
@@ -167,7 +146,7 @@ impl<T: 'static> QueryData for Option<&T> {
     type ReadOnlyItem<'w> = Option<&'w T>;
     type Fetch = Option<*const T>;
 
-    fn matches(_types: &FxHashSet<TypeId>) -> bool {
+    fn matches(_types: &IndexSet<TypeId, FxBuildHasher>) -> bool {
         true
     }
 
@@ -199,13 +178,13 @@ impl<T: 'static> QueryData for Option<&T> {
     }
 }
 
-#[cfg(not(feature = "change-detection"))]
+#[cfg(not(feature = "reactivity"))]
 impl<T: 'static> QueryData for Option<&mut T> {
     type Item<'w> = Option<&'w mut T>;
     type ReadOnlyItem<'w> = Option<&'w T>;
     type Fetch = Option<*mut T>;
 
-    fn matches(_types: &FxHashSet<TypeId>) -> bool {
+    fn matches(_types: &IndexSet<TypeId, FxBuildHasher>) -> bool {
         true
     }
 
@@ -249,14 +228,14 @@ impl<T: 'static> QueryData for Option<&mut T> {
     }
 }
 
-#[cfg(feature = "change-detection")]
+#[cfg(feature = "reactivity")]
 
 impl<T: 'static> QueryData for Option<&mut T> {
     type Item<'w> = Option<Mut<'w, T>>;
     type ReadOnlyItem<'w> = Option<&'w T>;
-    type Fetch = (Option<*mut T>, *mut ChangedMarker<T>, u8, u32, bool);
+    type Fetch = Option<(*mut T, *mut ChangedMarker<T>, u8, bool)>;
 
-    fn matches(_types: &FxHashSet<TypeId>) -> bool {
+    fn matches(_types: &IndexSet<TypeId, FxBuildHasher>) -> bool {
         true
     }
 
@@ -265,18 +244,12 @@ impl<T: 'static> QueryData for Option<&mut T> {
         writes.push(TypeId::of::<ChangedMarker<T>>());
     }
 
-    unsafe fn init_fetch(archetype: &Archetype, data: &mut FunctionData) -> Self::Fetch {
+    unsafe fn init_fetch(archetype: &Archetype, _data: &mut FunctionData) -> Self::Fetch {
         unsafe {
             let columns = &mut *archetype.columns.get();
             let component_id = TypeId::of::<T>();
             let marker_id = TypeId::of::<ChangedMarker<T>>();
-            let generation_data = data
-                .get_data::<FunctionGenerationData>()
-                .expect("Missing FunctionGenerationData on optional mutable component query fetch");
-
-            let system_id = generation_data.system_id;
-            let current_generation = GenerationRing::current();
-
+            let current_write_idx = CurrentBufferIdx::current_write_idx();
             if columns.contains_key(&component_id) {
                 let data_ptr = (*archetype.fetch_column_raw::<T>()).as_mut_ptr();
 
@@ -287,30 +260,12 @@ impl<T: 'static> QueryData for Option<&mut T> {
                         .downcast_mut::<Vec<ChangedMarker<T>>>()
                         .unwrap();
 
-                    (
-                        Some(data_ptr),
-                        vec_ptr.as_mut_ptr(),
-                        current_generation,
-                        system_id,
-                        true,
-                    )
+                    Some((data_ptr, vec_ptr.as_mut_ptr(), current_write_idx, true))
                 } else {
-                    (
-                        Some(data_ptr),
-                        std::ptr::null_mut(),
-                        current_generation,
-                        system_id,
-                        false,
-                    )
+                    Some((data_ptr, std::ptr::null_mut(), current_write_idx, false))
                 }
             } else {
-                (
-                    None,
-                    std::ptr::null_mut(),
-                    current_generation,
-                    system_id,
-                    false,
-                )
+                None
             }
         }
     }
@@ -318,13 +273,12 @@ impl<T: 'static> QueryData for Option<&mut T> {
     #[inline(always)]
     unsafe fn fetch_mut<'w>(fetch: Self::Fetch, index: usize) -> Self::Item<'w> {
         unsafe {
-            if let Some(data_head) = fetch.0 {
+            if let Some(data) = fetch {
                 Some(Mut {
-                    value: data_head.add(index),
-                    marker: fetch.1.add(index),
-                    generation: fetch.2,
-                    system_id: fetch.3,
-                    should_modify: fetch.4,
+                    value: data.0.add(index),
+                    marker: data.1.add(index),
+                    current_write_idx: data.2,
+                    should_modify: data.3,
                     _marker: std::marker::PhantomData,
                 })
             } else {
@@ -336,8 +290,8 @@ impl<T: 'static> QueryData for Option<&mut T> {
     #[inline(always)]
     unsafe fn fetch_read_only<'w>(fetch: Self::Fetch, index: usize) -> Self::ReadOnlyItem<'w> {
         unsafe {
-            if let Some(data_head) = fetch.0 {
-                Some(&*data_head.add(index))
+            if let Some(data_head) = fetch {
+                Some(&*data_head.0.add(index))
             } else {
                 None
             }
@@ -352,7 +306,7 @@ macro_rules! impl_world_query_tuple {
             type ReadOnlyItem<'w> = ($($name::ReadOnlyItem<'w>,)*);
             type Fetch = ($($name::Fetch,)*);
 
-            fn matches(types: &FxHashSet<TypeId>) -> bool { $($name::matches(types))&&* }
+            fn matches(types: &IndexSet<TypeId, FxBuildHasher>) -> bool { $($name::matches(types))&&* }
             unsafe fn init_fetch(archetype: &Archetype, systems_data: &mut FunctionData) -> Self::Fetch { unsafe { ($($name::init_fetch(archetype, systems_data),)*) } }
             unsafe fn fetch_mut<'w>(fetch: Self::Fetch, index: usize) -> Self::Item<'w> {
                 unsafe {($($name::fetch_mut(fetch.$idx, index),)*)}

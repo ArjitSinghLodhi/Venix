@@ -3,18 +3,19 @@ use std::{
     hash::{BuildHasherDefault, Hash},
 };
 
-use fxhash::{FxHashMap, FxHashSet};
+use fxhash::{FxBuildHasher, FxHashMap};
+use indexmap::IndexSet;
 
 use crate::world::storage::World;
 
 pub struct AccessHashSet<T: Eq + Hash> {
-    pub(crate) set: FxHashSet<T>,
+    pub(crate) set: IndexSet<T, FxBuildHasher>,
 }
 
 impl<T: Eq + Hash> AccessHashSet<T> {
     pub(crate) fn new() -> Self {
         Self {
-            set: FxHashSet::default(),
+            set: IndexSet::default(),
         }
     }
 
@@ -239,22 +240,6 @@ impl<Marker, F> SystemData for FunctionSystem<Marker, F> {
     }
 }
 
-pub struct FunctionGenerationData {
-    pub(crate) last_run_generation: u8,
-    pub(crate) current_run_generation: u8,
-    pub(crate) system_id: u32,
-}
-
-impl FunctionGenerationData {
-    pub(crate) fn new() -> Self {
-        Self {
-            last_run_generation: 0,
-            current_run_generation: 0,
-            system_id: 0,
-        }
-    }
-}
-
 pub trait IntoSystem<Marker> {
     type SystemType: System + 'static;
     fn into_system(self) -> Self::SystemType;
@@ -296,11 +281,16 @@ where
     }
 }
 
-pub struct SystemId(u32);
+pub struct SystemId {
+    pub(crate) id: u32,
+}
 
 impl SystemId {
+    pub(crate) fn new(id: u32) -> Self {
+        Self { id }
+    }
     pub fn get_id(&self) -> u32 {
-        self.0
+        self.id
     }
 }
 
@@ -310,7 +300,9 @@ impl SystemParam for SystemId {
     }
 
     fn extract(_world: &mut World, system_data: &mut FunctionData) -> Self {
-        let generation_data = system_data.get_data::<FunctionGenerationData>().unwrap();
-        Self(generation_data.system_id)
+        let system_id = system_data.get_data::<SystemId>().unwrap();
+        Self {
+            id: system_id.get_id(),
+        }
     }
 }

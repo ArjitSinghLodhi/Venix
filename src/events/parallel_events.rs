@@ -1,88 +1,70 @@
-use std::{
-    cell::UnsafeCell,
-    marker::PhantomData,
-    ptr::NonNull,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use std::sync::{Arc, RwLock};
 
 use crate::{
-    events::{
-        EventBuffer, EventWriter,
-        events::{EventLocalBufferSlot, EventQueue, EventWriterOrigin},
-    },
+    events::{EventBuffer, EventReader, EventWriter, events::EventQueue},
     extensions::{FunctionData, ParamAccess, SystemParam, World},
-    system::validation::FunctionGenerationData,
-    world::storage::GenerationRing,
 };
 
-pub struct ParallelEventWriter<'w, T: 'static + Send> {
-    master_buffer: *const EventBuffer<T>,
-    generation: u8,
-    system_id: u32,
-    _marker: PhantomData<&'w ()>,
+pub struct ParallelEventWriter<T: 'static + Send + Sync> {
+    write_buffer: Arc<RwLock<EventQueue<T>>>,
 }
 
-unsafe impl<'w, T: 'static + Send> Send for ParallelEventWriter<'w, T> {}
-unsafe impl<'w, T: 'static + Send> Sync for ParallelEventWriter<'w, T> {}
-
-impl<'w, T: 'static + Send> ParallelEventWriter<'w, T> {
+impl<T: 'static + Send + Sync> ParallelEventWriter<T> {
     pub fn scope<F, R>(&self, f: F) -> R
     where
         F: for<'b> FnOnce(EventWriter<'b, T>) -> R,
     {
-        unsafe {
-            let slot = (*self.master_buffer)
-                .local_buffers
-                .get_or(|| EventLocalBufferSlot {
-                    is_busy: AtomicBool::new(false),
-                    data: UnsafeCell::new(EventQueue::new()),
-                });
-
-            let writer = if slot
-                .is_busy
-                .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
-                .is_ok()
-            {
-                EventWriter {
-                    local_data: NonNull::new_unchecked(slot.data.get()),
-                    origin: EventWriterOrigin::ThreadLocal(&slot.is_busy as *const AtomicBool),
-                    master_buffer: self.master_buffer,
-                    generation: self.generation,
-                    system_id: self.system_id,
-                    _marker: std::marker::PhantomData,
-                }
-            } else {
-                let heap_box = Box::new(EventQueue::new());
-                let heap_ptr = NonNull::new_unchecked(Box::into_raw(heap_box));
-
-                EventWriter {
-                    local_data: heap_ptr,
-                    origin: EventWriterOrigin::HeapFallback(heap_ptr),
-                    master_buffer: self.master_buffer,
-                    generation: self.generation,
-                    system_id: self.system_id,
-                    _marker: std::marker::PhantomData,
-                }
-            };
-            f(writer)
-        }
+        let writer = EventWriter {
+            write_buffer: self.write_buffer.read().unwrap(),
+        };
+        f(writer)
     }
 }
 
-impl<'w, T: 'static + Send> SystemParam for ParallelEventWriter<'w, T> {
+impl<T: 'static + Send + Sync> SystemParam for ParallelEventWriter<T> {
     fn get_access() -> ParamAccess {
         ParamAccess::default()
     }
 
-    fn extract(world: &mut World, system_data: &mut FunctionData) -> Self {
+    fn extract(world: &mut World, _system_data: &mut FunctionData) -> Self {
         let buffer_ptr = world.get_resource::<EventBuffer<T>>() as *const EventBuffer<T>;
-        let generation_data = system_data.get_data::<FunctionGenerationData>().unwrap();
-
+        let queue = unsafe { (*buffer_ptr).writer_queue.clone() };
         Self {
-            master_buffer: buffer_ptr,
-            generation: GenerationRing::current(),
-            system_id: generation_data.system_id,
-            _marker: PhantomData,
+            write_buffer: queue,
         }
     }
 }
+
+unsafe impl<T: 'static + Send + Sync> Send for ParallelEventWriter<T> {}
+unsafe impl<T: 'static + Send + Sync> Sync for ParallelEventWriter<T> {}
+
+pub struct ParallelEventReader<T: 'static + Send + Sync> {
+    read_buffer: Arc<RwLock<EventQueue<T>>>,
+}
+
+impl<T: 'static + Send + Sync> ParallelEventReader<T> {
+    pub fn scope<F, R>(&self, f: F) -> R
+    where
+        F: for<'b> FnOnce(EventReader<'b, T>) -> R,
+    {
+        let reader = EventReader {
+            read_buffer: self.read_buffer.read().unwrap(),
+        };
+        f(reader)
+    }
+}
+
+impl<T: 'static + Send + Sync> SystemParam for ParallelEventReader<T> {
+    fn get_access() -> ParamAccess {
+        ParamAccess::default()
+    }
+
+    fn extract(world: &mut World, _system_data: &mut FunctionData) -> Self {
+        let buffer_ptr = world.get_resource::<EventBuffer<T>>() as *const EventBuffer<T>;
+        let queue = unsafe { (*buffer_ptr).read_queue.clone() };
+        Self { read_buffer: queue }
+    }
+}
+
+unsafe impl<T: 'static + Send + Sync> Send for ParallelEventReader<T> {}
+unsafe impl<T: 'static + Send + Sync> Sync for ParallelEventReader<T> {}

@@ -45,8 +45,7 @@ impl CommandQueue {
         let padding_gap = aligned_old_bytes - old_byte_len;
 
         let total_new_bytes = aligned_old_bytes + block_size;
-        let target_u64_count =
-            (total_new_bytes + mem::size_of::<u64>() - 1) / mem::size_of::<u64>();
+        let target_u64_count = total_new_bytes.div_ceil(mem::size_of::<u64>());
 
         let old_u64_count = self.u64_chunks.len();
         self.u64_chunks.reserve(target_u64_count - old_u64_count);

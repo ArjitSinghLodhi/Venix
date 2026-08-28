@@ -1,6 +1,7 @@
 use std::any::TypeId;
 
-use fxhash::FxHashSet;
+use fxhash::FxBuildHasher;
+use indexmap::IndexSet;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use crate::{
@@ -17,7 +18,7 @@ pub trait QueryData {
     type ReadOnlyItem<'w>;
     type Fetch: Copy;
 
-    fn matches(types: &FxHashSet<TypeId>) -> bool;
+    fn matches(types: &IndexSet<TypeId, FxBuildHasher>) -> bool;
     unsafe fn init_fetch(archetype: &Archetype, systems_data: &mut FunctionData) -> Self::Fetch;
     fn collect_access(
         reads: &mut AccessVec<std::any::TypeId>,
@@ -89,6 +90,10 @@ impl<'w, Q: QueryData, T> QueryArchetypeView<'w, Q, T> {
     #[inline(always)]
     pub fn len(&self) -> usize {
         self.indices.len()
+    }
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
@@ -191,7 +196,7 @@ pub struct Query<'q, Q: QueryData, F: QueryFilter = EmptyQueryFilter> {
 unsafe impl<'q, Q: QueryData, F: QueryFilter> Send for Query<'q, Q, F> {}
 unsafe impl<'q, Q: QueryData, F: QueryFilter> Sync for Query<'q, Q, F> {}
 
-impl<'q, 'w, Q: QueryData + 'w, F: QueryFilter> Query<'q, Q, F> {
+impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
     pub(crate) fn new(world: &mut World, system_data: &mut FunctionData) -> Self {
         let mut matching_archetypes = vec![None; world.archetypes_manager.archetypes.len()];
         let mut cached_fetches = vec![None; world.archetypes_manager.archetypes.len()];

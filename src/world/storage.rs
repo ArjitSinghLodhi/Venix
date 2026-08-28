@@ -14,31 +14,28 @@ use crate::{
     world::archetypes::{ArchetypeId, ArchetypeManager},
 };
 
-#[cfg(feature = "change-detection")]
-use crate::query::changed::TRACKED_COMPONENTS;
+#[cfg(feature = "reactivity")]
+use crate::detection::TRACKED_COMPONENTS;
 
-pub struct GenerationRing;
-static GLOBAL_GEN: AtomicU8 = AtomicU8::new(1);
+pub(crate) struct CurrentBufferIdx;
+static CURRENT_BUFFER_IDX: AtomicU8 = AtomicU8::new(1);
 
-impl GenerationRing {
+impl CurrentBufferIdx {
     #[inline]
-    pub fn current() -> u8 {
-        GLOBAL_GEN.load(Ordering::Relaxed)
+    #[cfg(feature = "reactivity")]
+    pub(crate) fn current_read_idx() -> u8 {
+        CURRENT_BUFFER_IDX.load(Ordering::Relaxed)
     }
-    #[inline]
-    pub fn advance() -> u8 {
-        let current = Self::current();
-        let next = if current == 4 { 1 } else { current + 1 };
-        GLOBAL_GEN.store(next, Ordering::Relaxed);
-        next
+    #[cfg(feature = "reactivity")]
+    pub(crate) fn current_write_idx() -> u8 {
+        let idx = CURRENT_BUFFER_IDX.load(Ordering::Relaxed);
+        if idx == 0 { 1 } else { 0 }
     }
-    #[inline]
-    pub fn previous(current: u8) -> u8 {
-        if current == 1 { 4 } else { current - 1 }
-    }
-    #[inline]
-    pub fn stale_threshold(current: u8) -> u8 {
-        Self::previous(Self::previous(current))
+
+    pub(crate) fn advance() {
+        let idx = CURRENT_BUFFER_IDX.load(Ordering::Relaxed);
+        let next_idx = if idx == 1 { 0 } else { 1 };
+        CURRENT_BUFFER_IDX.store(next_idx, Ordering::Relaxed);
     }
 }
 
@@ -149,13 +146,13 @@ impl World {
     }
 
     pub(crate) fn end_of_frame_sync(&mut self) {
-        GenerationRing::advance();
-        #[cfg(feature = "change-detection")]
+        CurrentBufferIdx::advance();
+        #[cfg(feature = "reactivity")]
         self.clear_changed_tracker();
         self.clear_events();
     }
 
-    #[cfg(feature = "change-detection")]
+    #[cfg(feature = "reactivity")]
     fn clear_changed_tracker(&mut self) {
         let tracked = TRACKED_COMPONENTS.read().unwrap();
 
