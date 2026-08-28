@@ -47,9 +47,9 @@ checksum = "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17"
 
 [[package]]
 name = "either"
-version = "1.17.0"
+version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e5e8f6c15a24b9a3ee5efec809ccd006d3b30e8b3bb63c39af737c7f87daa1d"
+checksum = "252afb9ae5eaa683babdc6a068b3f5726eb19e05070c731f9b2a23a7c3e8ed34"
 
 [[package]]
 name = "equivalent"
@@ -339,7 +339,7 @@ checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
 name = "venix"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "fxhash",
  "indexmap",
@@ -352,9 +352,9 @@ dependencies = [
 
 [[package]]
 name = "venix_macros"
-version = "1.0.3"
+version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93aa869d65d78be4bcc31de94e8a1cce2987310a9fce40672623f99ea609cd6a"
+checksum = "bee618984d5776e932f5e48323d591d7ce0fad22ea9a61a128a1f1f08a52f0e5"
 dependencies = [
  "proc-macro2",
  "quote",
