@@ -8,8 +8,8 @@ use fxhash::{FxBuildHasher, FxHashMap, FxHashSet};
 
 use crate::{
     app::plugin::PluginsBuildAll,
-    commands::bundle::ComponentBundle,
-    events::{EventBuffer, register_event},
+    commands::{ParallelCommands, bundle::ComponentBundle},
+    events::{EventBuffer, ParallelEventReader, ParallelEventWriter, register_event},
     extensions::SystemExt,
     schedule::{
         schedule::{IntoScheduleId, Schedule, ScheduleId, ScheduleLabel, SchedulePlace},
@@ -235,6 +235,22 @@ impl App {
 
     pub fn end_of_frame_sync(&mut self) {
         self.world.end_of_frame_sync();
+    }
+
+    pub fn get_par_commands(&mut self) -> ParallelCommands {
+        self.world.get_par_commands()
+    }
+
+    pub fn get_par_event_writer<T: 'static + Send + Sync>(&mut self) -> ParallelEventWriter<T> {
+        self.configuration.built();
+        self.configuration.ran_startup();
+        self.world.get_par_event_writer::<T>()
+    }
+
+    pub fn get_par_event_reader<T: 'static + Send + Sync>(&mut self) -> ParallelEventReader<T> {
+        self.configuration.built();
+        self.configuration.ran_startup();
+        self.world.get_par_event_reader::<T>()
     }
 }
 

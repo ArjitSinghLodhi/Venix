@@ -8,10 +8,7 @@ use std::{
 };
 
 use crate::{
-    commands::{CommandBuffer, bundle::ComponentBundle},
-    events::TRACKED_EVENTS,
-    registry::REGISTRY,
-    world::archetypes::{ArchetypeId, ArchetypeManager},
+    commands::{CommandBuffer, ParallelCommands, bundle::ComponentBundle}, events::{ParallelEventReader, ParallelEventWriter, TRACKED_EVENTS}, extensions::{FunctionData, SystemParam}, registry::REGISTRY, world::archetypes::{ArchetypeId, ArchetypeManager}
 };
 
 #[cfg(feature = "reactivity")]
@@ -179,5 +176,17 @@ impl World {
                 .expect("Registered event Not initialized somehow? maybe removed");
             (meta.clear_events)(unsafecell);
         }
+    }
+
+    pub(crate) fn get_par_commands(&mut self) -> ParallelCommands {
+        ParallelCommands::extract(self, &mut FunctionData::new())
+    }
+
+    pub(crate) fn get_par_event_writer<T: 'static + Send + Sync>(&mut self) -> ParallelEventWriter<T> {
+        ParallelEventWriter::extract(self, &mut FunctionData::new())
+    } 
+
+    pub(crate) fn get_par_event_reader<T: 'static + Send + Sync>(&mut self) -> ParallelEventReader<T> {
+        ParallelEventReader::extract(self, &mut FunctionData::new())
     }
 }

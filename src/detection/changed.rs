@@ -63,14 +63,13 @@ impl<T: 'static> QueryData for ChangedTracker<T> {
     type Fetch = (u8, *const ChangedMarker<T>);
 
     fn matches(types: &IndexSet<TypeId, FxBuildHasher>) -> bool {
-        types.contains(&TypeId::of::<T>())
+        types.contains(&TypeId::of::<ChangedMarker<T>>())
     }
 
     fn collect_access(
         reads: &mut AccessVec<std::any::TypeId>,
         _writes: &mut AccessVec<std::any::TypeId>,
     ) {
-        reads.push(TypeId::of::<T>());
         reads.push(TypeId::of::<ChangedMarker<T>>());
         register_tracked_component::<T>();
     }
@@ -103,11 +102,10 @@ impl<T: 'static> QueryData for ChangedTracker<T> {
 pub struct Changed<T>(std::marker::PhantomData<T>);
 impl<T: 'static> QueryFilter for Changed<T> {
     fn matches(types: &AccessHashSet<TypeId>) -> bool {
-        types.contains(&TypeId::of::<T>())
+        types.contains(&TypeId::of::<ChangedMarker<T>>())
     }
 
     fn collect_filter(withs: &mut AccessVec<TypeId>, _withouts: &mut AccessVec<TypeId>) {
-        withs.push(TypeId::of::<T>());
         withs.push(TypeId::of::<ChangedMarker<T>>());
         register_tracked_component::<T>();
     }

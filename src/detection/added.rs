@@ -59,7 +59,6 @@ impl<T: 'static> QueryFilter for Added<T> {
         withs: &mut crate::extensions::AccessVec<std::any::TypeId>,
         _withouts: &mut crate::extensions::AccessVec<std::any::TypeId>,
     ) {
-        withs.push(TypeId::of::<T>());
         withs.push(TypeId::of::<AddedMarker<T>>());
         register_added_tracked_component::<T>();
     }
@@ -95,12 +94,11 @@ impl<T: 'static> QueryData for AddedTracker<T> {
         reads: &mut crate::extensions::AccessVec<std::any::TypeId>,
         _writes: &mut crate::extensions::AccessVec<std::any::TypeId>,
     ) {
-        reads.push(TypeId::of::<T>());
         reads.push(TypeId::of::<AddedMarker<T>>());
         register_added_tracked_component::<T>();
     }
     fn matches(types: &IndexSet<TypeId, FxBuildHasher>) -> bool {
-        types.contains(&TypeId::of::<T>())
+        types.contains(&TypeId::of::<AddedMarker<T>>())
     }
     unsafe fn init_fetch(
         archetype: &crate::extensions::Archetype,
