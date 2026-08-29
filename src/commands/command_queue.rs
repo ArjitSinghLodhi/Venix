@@ -49,6 +49,7 @@ impl CommandQueue {
                     if let Some(chunk) = chunks_iter.next() {
                         let bytes_left = total_bytes_to_read - bytes_written;
                         let bytes_to_copy = bytes_left.min(16);
+                        
                         std::ptr::copy_nonoverlapping(
                             chunk.bytes.as_ptr().cast::<u8>(),
                             dst_ptr.add(bytes_written),
@@ -118,63 +119,74 @@ impl Drop for CommandQueue {
     }
 }
 
-struct StackCommandIterator {
-    buffer: Vec<BufferChunk>,
+struct StackCommandIterator<C: WorldCommand> {
+    meta: ManuallyDrop<CommandMeta>,
+    command: ManuallyDrop<C>,
     current_chunk_idx: usize,
+    total_chunks: usize,
 }
 
-impl StackCommandIterator {
-    fn new<C: WorldCommand>(meta: CommandMeta, command: C) -> Self {
+impl<C: WorldCommand> StackCommandIterator<C> {
+    fn new(meta: CommandMeta, command: C) -> Self {
         let payload_size = mem::size_of::<C>();
         let total_chunks = 1 + payload_size.div_ceil(16);
-        
-        let mut buffer = vec![BufferChunk { bytes: [MaybeUninit::uninit(); 16] }; total_chunks];
-
-        unsafe {
-            let buffer_ptr = buffer.as_mut_ptr().cast::<u8>();
-            std::ptr::write_bytes(buffer_ptr, 0, total_chunks * 16);
-        
-            std::ptr::write(
-                buffer_ptr.cast::<unsafe fn(&mut dyn Iterator<Item = &mut BufferChunk>, Option<&mut World>)>(), 
-                meta.consume_and_advance
-            );
-            
-            let command_manually_drop = ManuallyDrop::new(command);
-            std::ptr::copy_nonoverlapping(
-                &*command_manually_drop as *const C as *const u8,
-                buffer_ptr.add(16),
-                payload_size,
-            );
-        }
-
         Self {
-            buffer,
+            meta: ManuallyDrop::new(meta),
+            command: ManuallyDrop::new(command),
             current_chunk_idx: 0,
+            total_chunks,
         }
     }
 }
 
-impl Iterator for StackCommandIterator {
+impl<C: WorldCommand> Iterator for StackCommandIterator<C> {
     type Item = BufferChunk;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current_chunk_idx >= self.buffer.len() {
+        if self.current_chunk_idx >= self.total_chunks {
             return None;
         }
-        let chunk = self.buffer[self.current_chunk_idx];
+
+        let mut chunk = BufferChunk { bytes: [MaybeUninit::uninit(); 16] };
+        
+        unsafe {
+            let chunk_ptr = chunk.bytes.as_mut_ptr().cast::<u8>();
+            std::ptr::write_bytes(chunk_ptr, 0, 16);
+
+            if self.current_chunk_idx == 0 {
+                std::ptr::write(
+                    chunk_ptr.cast::<unsafe fn(&mut dyn Iterator<Item = &mut BufferChunk>, Option<&mut World>)>(),
+                    self.meta.consume_and_advance,
+                );
+            } else {
+                let command_start_ptr = &*self.command as *const C as *const u8;
+                let payload_offset = (self.current_chunk_idx - 1) * 16;
+                let bytes_left = mem::size_of::<C>().saturating_sub(payload_offset);
+                let bytes_to_copy = bytes_left.min(16);
+
+                if bytes_to_copy > 0 {
+                    std::ptr::copy_nonoverlapping(
+                        command_start_ptr.add(payload_offset),
+                        chunk_ptr,
+                        bytes_to_copy,
+                    );
+                }
+            }
+        }
+
         self.current_chunk_idx += 1;
         Some(chunk)
     }
 
     #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.buffer.len() - self.current_chunk_idx;
+        let remaining = self.total_chunks - self.current_chunk_idx;
         (remaining, Some(remaining))
     }
 }
 
-impl ExactSizeIterator for StackCommandIterator {}
+impl<C: WorldCommand> ExactSizeIterator for StackCommandIterator<C> {}
 
 struct FunctionCommand<F>
 where
