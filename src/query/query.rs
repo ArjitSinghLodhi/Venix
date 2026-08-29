@@ -1,8 +1,10 @@
-use std::any::TypeId;
-
 use fxhash::FxBuildHasher;
 use indexmap::IndexSet;
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+    IntoParallelRefMutIterator, ParallelIterator,
+};
+use std::{any::TypeId, marker::PhantomData};
 
 use crate::{
     entity::Entity,
@@ -10,7 +12,10 @@ use crate::{
     query::filter::{EmptyQueryFilter, QueryFilter},
     registry::REGISTRY,
     system::validation::{AccessHashSet, FunctionData},
-    world::{archetypes::Archetype, storage::World},
+    world::{
+        archetypes::{Archetype, ArchetypeId},
+        storage::World,
+    },
 };
 
 pub trait QueryData {
@@ -81,8 +86,9 @@ impl<Q: QueryData> ThreadSafeFetch<Q> {
 }
 
 pub struct QueryArchetypeView<'a, Q: QueryData, I> {
-    pub(crate) indices: &'a [usize],
-    pub(super) fetch: Q::Fetch,
+    indices: &'a [usize],
+    fetch: Q::Fetch,
+    archetype_id: ArchetypeId,
     _marker: std::marker::PhantomData<I>,
 }
 
@@ -97,7 +103,7 @@ impl<'w, Q: QueryData, T> QueryArchetypeView<'w, Q, T> {
     }
 }
 
-impl<'a, Q: QueryData, T: Sync> QueryArchetypeView<'a, Q, T> {
+impl<'a, Q: QueryData, T> QueryArchetypeView<'a, Q, T> {
     pub fn iter<'b>(&'b self) -> impl Iterator<Item = Q::ReadOnlyItem<'b>> {
         self.indices
             .iter()
@@ -138,6 +144,27 @@ impl<'a, Q: QueryData, T: Sync> QueryArchetypeView<'a, Q, T> {
                     _marker: std::marker::PhantomData,
                 }
             })
+    }
+
+    pub fn get(&self, entity: &Entity) -> Option<Q::ReadOnlyItem<'a>> {
+        unsafe {
+            let cell = REGISTRY.get_ptr(entity.registry_index as usize);
+            let arch_id = (*cell).archetype_id.id();
+            if arch_id == self.archetype_id.id() {
+                let row_idx = (*cell).idx;
+                Some(Q::fetch_read_only(self.fetch, row_idx as usize))
+            } else {
+                None
+            }
+        }
+    }
+
+    pub unsafe fn get_unchecked(&self, entity: &Entity) -> Q::ReadOnlyItem<'a> {
+        unsafe {
+            let cell = REGISTRY.get_ptr(entity.registry_index as usize);
+            let row_idx = (*cell).idx;
+            Q::fetch_read_only(self.fetch, row_idx as usize)
+        }
     }
 }
 
@@ -185,13 +212,44 @@ impl<'a, Q: QueryData> QueryArchetypeView<'a, Q, Mutable> {
                 }
             })
     }
+
+    pub fn get_mut(&mut self, entity: &Entity) -> Option<Q::Item<'a>> {
+        unsafe {
+            let cell = REGISTRY.get_ptr(entity.registry_index as usize);
+            let arch_id = (*cell).archetype_id.id();
+            if arch_id == self.archetype_id.id() {
+                let row_idx = (*cell).idx;
+                Some(Q::fetch_mut(self.fetch, row_idx as usize))
+            } else {
+                None
+            }
+        }
+    }
+
+    pub unsafe fn get_mut_unchecked(&self, entity: &Entity) -> Q::Item<'a> {
+        unsafe {
+            let cell = REGISTRY.get_ptr(entity.registry_index as usize);
+            let row_idx = (*cell).idx;
+            Q::fetch_mut(self.fetch, row_idx as usize)
+        }
+    }
+}
+
+struct ThreadSafePtr<T>(*const T);
+unsafe impl<T> Send for ThreadSafePtr<T> {}
+unsafe impl<T> Sync for ThreadSafePtr<T> {}
+
+impl<T> Clone for ThreadSafePtr<T> {
+    fn clone(&self) -> Self {
+        ThreadSafePtr(self.0.clone())
+    }
 }
 
 pub struct Query<'q, Q: QueryData, F: QueryFilter = EmptyQueryFilter> {
-    pub(crate) matching_archetypes: Vec<Option<*const Archetype>>,
-    pub(crate) cached_fetches: Vec<Option<Q::Fetch>>,
-    pub(crate) cached_indices: Vec<Vec<usize>>,
-    pub(crate) _marker: std::marker::PhantomData<(&'q (), Q, F)>,
+    matching_archetypes: Vec<Option<ThreadSafePtr<Archetype>>>,
+    cached_fetches: Vec<Option<Q::Fetch>>,
+    cached_indices: Vec<Vec<usize>>,
+    _marker: std::marker::PhantomData<(&'q (), F)>,
 }
 unsafe impl<'q, Q: QueryData, F: QueryFilter> Send for Query<'q, Q, F> {}
 unsafe impl<'q, Q: QueryData, F: QueryFilter> Sync for Query<'q, Q, F> {}
@@ -209,7 +267,8 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
                     set: arch.types.clone(),
                 })
             {
-                matching_archetypes[arch_id as usize] = Some(arch as *const Archetype);
+                matching_archetypes[arch_id as usize] =
+                    Some(ThreadSafePtr(arch as *const Archetype));
                 let fetch = unsafe { Q::init_fetch(arch, system_data) };
                 cached_fetches[arch_id as usize] = Some(fetch);
                 let mut indices = (0..arch.entities.len()).collect::<Vec<usize>>();
@@ -222,7 +281,7 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
             matching_archetypes,
             cached_fetches,
             cached_indices,
-            _marker: std::marker::PhantomData,
+            _marker: PhantomData,
         }
     }
 
@@ -230,14 +289,36 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
         self.matching_archetypes
             .iter()
             .flatten()
-            .map(move |&arch_ptr| unsafe {
-                let arch = &*arch_ptr;
+            .map(move |arch_ptr| unsafe {
+                let arch = &*arch_ptr.0;
                 let arch_idx = arch.id() as usize;
 
                 QueryArchetypeView {
                     indices: &self.cached_indices[arch_idx],
                     fetch: self.cached_fetches[arch_idx].unwrap(),
-                    _marker: std::marker::PhantomData,
+                    archetype_id: arch.id,
+                    _marker: PhantomData,
+                }
+            })
+    }
+
+    pub fn par_iter<'a>(
+        &'a self,
+    ) -> impl ParallelIterator<Item = QueryArchetypeView<'a, Q, ReadOnly>>
+    where
+        <Q as QueryData>::Fetch: Send,
+    {
+        self.matching_archetypes
+            .par_iter()
+            .flatten()
+            .map(|arch_ptr| {
+                let arch = unsafe { &*arch_ptr.0 };
+                let arch_idx = arch.id() as usize;
+                QueryArchetypeView {
+                    indices: &self.cached_indices[arch_idx],
+                    fetch: self.cached_fetches[arch_idx].unwrap(),
+                    archetype_id: arch.id,
+                    _marker: PhantomData,
                 }
             })
     }
@@ -249,17 +330,40 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
         self.matching_archetypes
             .iter()
             .flatten()
-            .map(move |&arch_ptr| unsafe {
-                let arch = &*arch_ptr;
+            .map(move |arch_ptr| unsafe {
+                let arch = &*arch_ptr.0;
                 let arch_idx = arch.id() as usize;
 
                 QueryArchetypeView {
                     indices: &cached_indices[arch_idx],
                     fetch: cached_fetches[arch_idx].unwrap(),
-                    _marker: std::marker::PhantomData,
+                    archetype_id: arch.id,
+                    _marker: PhantomData,
                 }
             })
     }
+
+    pub fn par_iter_mut<'a>(
+        &'a mut self,
+    ) -> impl ParallelIterator<Item = QueryArchetypeView<'a, Q, Mutable>>
+    where
+        <Q as QueryData>::Fetch: Send + Sync,
+    {
+        self.matching_archetypes
+            .par_iter_mut()
+            .flatten()
+            .map(|arch_ptr| {
+                let arch = unsafe { &*arch_ptr.0 };
+                let arch_idx = arch.id() as usize;
+                QueryArchetypeView {
+                    indices: &self.cached_indices[arch_idx],
+                    fetch: self.cached_fetches[arch_idx].unwrap(),
+                    archetype_id: arch.id,
+                    _marker: PhantomData,
+                }
+            })
+    }
+
     pub fn get(&self, entity: &Entity) -> Option<Q::ReadOnlyItem<'q>> {
         unsafe {
             let cell_ptr = REGISTRY.get_ptr(entity.registry_index as usize);
@@ -281,6 +385,30 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
 
             let fetch = self.cached_fetches[arch_id.id() as usize]?;
             Some(Q::fetch_mut(fetch, row_idx as usize))
+        }
+    }
+
+    pub unsafe fn get_unchecked(&self, entity: &Entity) -> Q::ReadOnlyItem<'q> {
+        unsafe {
+            let cell_ptr = REGISTRY.get_ptr(entity.registry_index as usize);
+
+            let arch_id = (*cell_ptr).archetype_id;
+            let row_idx = (*cell_ptr).idx;
+
+            let fetch = self.cached_fetches[arch_id.id() as usize].unwrap_unchecked();
+            Q::fetch_read_only(fetch, row_idx as usize)
+        }
+    }
+
+    pub unsafe fn get_mut_unchecked(&mut self, entity: &Entity) -> Q::Item<'q> {
+        unsafe {
+            let cell_ptr = REGISTRY.get_ptr(entity.registry_index as usize);
+
+            let arch_id = (*cell_ptr).archetype_id;
+            let row_idx = (*cell_ptr).idx;
+
+            let fetch = self.cached_fetches[arch_id.id() as usize].unwrap_unchecked();
+            Q::fetch_mut(fetch, row_idx as usize)
         }
     }
 }
