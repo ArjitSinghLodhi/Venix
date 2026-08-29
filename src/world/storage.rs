@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    commands::{CommandBuffer, DespawnCommand, ParallelCommands, bundle::ComponentBundle},
+    commands::{CommandBuffer, ParallelCommands, bundle::ComponentBundle},
     events::{ParallelEventReader, ParallelEventWriter, TRACKED_EVENTS},
     extensions::{FunctionData, SystemParam},
     registry::REGISTRY,
@@ -135,14 +135,10 @@ impl World {
                 }
             }
 
-            for despawn_target_ref in despawns.iter() {
-                unsafe {
-                    let despawn_target =
-                        std::ptr::read(despawn_target_ref as *const DespawnCommand);
-                    despawns.remove(&despawn_target);
-                    despawn_target.apply(self);
-                }
-            }
+            despawns.retain(|despawn_cmd| {
+                despawn_cmd.apply(self);
+                false
+            });
         }
         self.free_indices_list.sort_by(|a, b| b.cmp(a));
         self.commands = commands;

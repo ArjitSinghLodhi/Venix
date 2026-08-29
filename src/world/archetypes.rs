@@ -27,15 +27,25 @@ impl<T: 'static> AnyColumn for Vec<T> {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
+
     unsafe fn move_row_erased(&mut self, index: usize, dst: *mut dyn AnyColumn) {
         let item = self.swap_remove(index);
-        let dst_vec = unsafe { &mut *(dst as *mut Vec<T>) };
+
+        let dst_vec = unsafe { 
+            (&mut *dst)
+                .as_any_mut()
+                .downcast_mut::<Vec<T>>()
+                .expect("Archetype component column type mismatch") 
+        };
+        
         dst_vec.push(item);
     }
+
     fn clone_empty(&self) -> Box<dyn AnyColumn> {
         Box::new(Vec::<T>::new())
     }
 }
+
 
 #[derive(Clone, Copy, PartialEq, Debug, Eq, Hash)]
 pub(crate) struct ArchetypeId(u32);

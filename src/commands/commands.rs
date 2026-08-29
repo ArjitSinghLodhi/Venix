@@ -57,7 +57,7 @@ pub struct DespawnCommand {
 }
 
 impl DespawnCommand {
-    pub fn apply(self, world: &mut World) {
+    pub(crate) fn apply(&self, world: &mut World) {
         let target_registry_idx = self.entity.registry_index as usize;
         let (arch_id, target_idx) = unsafe {
             let cell_ptr = REGISTRY.get_ptr(target_registry_idx);
@@ -97,16 +97,15 @@ impl DespawnCommand {
                 (*swapped_cell_ptr).idx = target_idx;
             }
         }
-        world.free_indices_list.push(target_registry_idx as u32);
-
-        arch.entities.swap_remove(target_idx as usize);
-
         unsafe {
-            let cols = &mut *arch.columns.get();
-            for col in cols.values_mut() {
+            let cols = arch.columns.get();
+            for col in (*cols).values_mut() {
                 col.data.swap_remove_erased(target_idx as usize);
             }
         }
+
+        arch.entities.swap_remove(target_idx as usize);
+        world.free_indices_list.push(target_registry_idx as u32);
     }
 
     pub fn despawn_target(&self) -> &Entity {
