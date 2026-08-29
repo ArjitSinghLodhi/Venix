@@ -1,6 +1,6 @@
 use crate::world::storage::World;
 use orx_concurrent_bag::ConcurrentBag;
-use std::mem::{self, MaybeUninit};
+use std::mem::{self, ManuallyDrop, MaybeUninit};
 use std::ptr;
 
 pub(crate) trait WorldCommand: 'static + Send {
@@ -8,7 +8,8 @@ pub(crate) trait WorldCommand: 'static + Send {
 }
 
 struct CommandMeta {
-    consume_and_advance: unsafe fn(payload_buf_ptr: *mut MaybeUninit<u64>, world: Option<&mut World>),
+    consume_and_advance:
+        unsafe fn(payload_buf_ptr: *mut MaybeUninit<u64>, world: Option<&mut World>),
     u64_count: usize,
 }
 
@@ -36,14 +37,14 @@ impl CommandQueue {
     pub(crate) fn new() -> Self {
         Self::default()
     }
-    
+
     pub(crate) fn push<C: WorldCommand>(&self, command: C) {
         let block_size = mem::size_of::<ConfiguredCommand<C>>();
         let total_u64_count = block_size.div_ceil(mem::size_of::<u64>());
-    
+
         let meta_u64_count = mem::size_of::<CommandMeta>().div_ceil(mem::size_of::<u64>());
         let payload_u64_count = total_u64_count - meta_u64_count;
-    
+
         let meta = CommandMeta {
             u64_count: payload_u64_count,
             consume_and_advance: |payload_buf_ptr, world| unsafe {
@@ -54,7 +55,7 @@ impl CommandQueue {
                 }
             },
         };
-    
+
         let stream_iter = StackCommandIterator {
             command: ManuallyDrop::new(ConfiguredCommand {
                 meta,
@@ -79,37 +80,41 @@ impl CommandQueue {
         }
 
         let meta_u64_size = mem::size_of::<CommandMeta>().div_ceil(mem::size_of::<u64>());
-        let split_vec = mem::take(&mut self.u64_chunks).into_inner();
-        let mut chunks_iter = split_vec.into_iter();
-
-            while let Some(first_chunk) = chunks_iter.next() {
-            self.scratchpad.clear();
-            self.scratchpad.push(first_chunk);
-            for _ in 1..meta_u64_size {
-                        if let Some(next_meta_chunk) = chunks_iter.next() {
-                    self.scratchpad.push(next_meta_chunk);
-                }
-            }
-            let meta: CommandMeta = unsafe { ptr::read(self.scratchpad.as_ptr().cast()) };
-            let total_needed = meta_u64_size + meta.u64_count;
-            if self.scratchpad.capacity() < total_needed {
-                self.scratchpad.reserve(total_needed - self.scratchpad.capacity());
-            }
-            for _ in 0..meta.u64_count {
-                if let Some(payload_chunk) = chunks_iter.next() {
-                    self.scratchpad.push(payload_chunk);
-                        }
+        {
+            let chunks_iter = &mut self.u64_chunks.iter_mut();
+            while let Some(first_chunk_ref) = chunks_iter.next() {
+                self.scratchpad.clear();
+                self.scratchpad.push(*first_chunk_ref);
+                for _ in 1..meta_u64_size {
+                    if let Some(next_meta_chunk_ref) = chunks_iter.by_ref().next() {
+                        self.scratchpad.push(*next_meta_chunk_ref);
                     }
-            unsafe {
-                let scratch_ptr = self.scratchpad.as_mut_ptr().cast::<u8>();
+                }
+
+                let meta: CommandMeta = unsafe { ptr::read(self.scratchpad.as_ptr().cast()) };
+                let total_needed = meta_u64_size + meta.u64_count;
+                if self.scratchpad.capacity() < total_needed {
+                    self.scratchpad
+                        .reserve(total_needed - self.scratchpad.capacity());
+                }
+
+                for _ in 0..meta.u64_count {
+                    if let Some(payload_chunk_ref) = chunks_iter.by_ref().next() {
+                        self.scratchpad.push(*payload_chunk_ref);
+                    }
+                }
+
+                unsafe {
+                    let scratch_ptr = self.scratchpad.as_mut_ptr().cast::<u8>();
                     let payload_scratch_ptr = scratch_ptr
                         .add(mem::size_of::<CommandMeta>())
                         .cast::<MaybeUninit<u64>>();
-
                     (meta.consume_and_advance)(payload_scratch_ptr, Some(world));
                 }
             }
         }
+        self.u64_chunks.clear();
+    }
 }
 
 impl Drop for CommandQueue {
@@ -117,48 +122,43 @@ impl Drop for CommandQueue {
         if self.u64_chunks.is_empty() {
             return;
         }
-
         let meta_u64_size = mem::size_of::<CommandMeta>().div_ceil(mem::size_of::<u64>());
-        let split_vec = mem::take(&mut self.u64_chunks).into_inner();
-        let mut chunks_iter = split_vec.into_iter();
-
-        while let Some(first_chunk) = chunks_iter.next() {
-            self.scratchpad.clear();
-            self.scratchpad.push(first_chunk);
-
-            for _ in 1..meta_u64_size {
-                    if let Some(next_meta_chunk) = chunks_iter.next() {
-                    self.scratchpad.push(next_meta_chunk);
-                }
-            }
-
-            let meta: CommandMeta = unsafe { ptr::read(self.scratchpad.as_ptr().cast()) };
-            let total_needed = meta_u64_size + meta.u64_count;
-
-            if self.scratchpad.capacity() < total_needed {
-                self.scratchpad.reserve(total_needed - self.scratchpad.capacity());
-            }
-
-            for _ in 0..meta.u64_count {
-                if let Some(payload_chunk) = chunks_iter.next() {
-                    self.scratchpad.push(payload_chunk);
+        {
+            let chunks_iter = &mut self.u64_chunks.iter_mut();
+            while let Some(first_chunk_ref) = chunks_iter.next() {
+                self.scratchpad.clear();
+                self.scratchpad.push(*first_chunk_ref);
+                for _ in 1..meta_u64_size {
+                    if let Some(next_meta_chunk_ref) = chunks_iter.by_ref().next() {
+                        self.scratchpad.push(*next_meta_chunk_ref);
                     }
                 }
 
-            unsafe {
-                let scratch_ptr = self.scratchpad.as_mut_ptr().cast::<u8>();
-                let payload_scratch_ptr = scratch_ptr
-                    .add(mem::size_of::<CommandMeta>())
-                    .cast::<MaybeUninit<u64>>();
+                let meta: CommandMeta = unsafe { ptr::read(self.scratchpad.as_ptr().cast()) };
+                let total_needed = meta_u64_size + meta.u64_count;
+                if self.scratchpad.capacity() < total_needed {
+                    self.scratchpad
+                        .reserve(total_needed - self.scratchpad.capacity());
+                }
 
-                (meta.consume_and_advance)(payload_scratch_ptr, None);
+                for _ in 0..meta.u64_count {
+                    if let Some(payload_chunk_ref) = chunks_iter.by_ref().next() {
+                        self.scratchpad.push(*payload_chunk_ref);
+                    }
+                }
+
+                unsafe {
+                    let scratch_ptr = self.scratchpad.as_mut_ptr().cast::<u8>();
+                    let payload_scratch_ptr = scratch_ptr
+                        .add(mem::size_of::<CommandMeta>())
+                        .cast::<MaybeUninit<u64>>();
+                    (meta.consume_and_advance)(payload_scratch_ptr, None);
+                }
             }
         }
+        self.u64_chunks.clear();
     }
 }
-
-use std::mem::ManuallyDrop;
-
 struct StackCommandIterator<C: WorldCommand> {
     command: ManuallyDrop<ConfiguredCommand<C>>,
     total_u64_count: usize,
@@ -184,7 +184,11 @@ impl<C: WorldCommand> Iterator for StackCommandIterator<C> {
             let bytes_left = struct_size.saturating_sub(byte_offset);
 
             if bytes_left >= mem::size_of::<u64>() {
-                ptr::copy_nonoverlapping(source_ptr.add(byte_offset), out_ptr, mem::size_of::<u64>());
+                ptr::copy_nonoverlapping(
+                    source_ptr.add(byte_offset),
+                    out_ptr,
+                    mem::size_of::<u64>(),
+                );
             } else {
                 ptr::write_bytes(out_ptr, 0, mem::size_of::<u64>());
                 if bytes_left > 0 {
