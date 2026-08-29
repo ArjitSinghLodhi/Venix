@@ -25,9 +25,9 @@ pub(crate) fn register_added_tracked_component<T: 'static>() {
             push_default_marker: |column| {
                 let raw_any = column.data.as_any_mut();
                 let vec = raw_any.downcast_mut::<Vec<AddedMarker<T>>>().unwrap();
-                let current_read_idx = CurrentBufferIdx::current_write_idx();
+                let current_write_idx = CurrentBufferIdx::current_write_idx();
                 let mut added_marker = [false; 2];
-                added_marker[current_read_idx as usize] = true;
+                added_marker[current_write_idx as usize] = true;
                 vec.push(AddedMarker {
                     added_marker,
                     phantom: PhantomData,

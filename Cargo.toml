@@ -1,6 +1,6 @@
 [package]
 name = "venix"
-version = "2.1.5"
+version = "2.1.6"
 edition = "2024"
 description = "A high-performance, archetype-based ECS engine written in Rust."
 readme = "README.md"
