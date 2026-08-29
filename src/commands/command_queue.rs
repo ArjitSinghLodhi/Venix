@@ -16,7 +16,7 @@ struct CommandMeta {
 #[repr(C, align(16))]
 #[derive(Copy, Clone)]
 pub(crate) struct BufferChunk {
-    pub(crate) bytes: [u8; 16],
+    pub(crate) bytes: [MaybeUninit<u8>; 16],
 }
 
 pub(crate) struct CommandQueue {
@@ -50,7 +50,7 @@ impl CommandQueue {
                         let bytes_left = total_bytes_to_read - bytes_written;
                         let bytes_to_copy = bytes_left.min(16);
                         std::ptr::copy_nonoverlapping(
-                            chunk.bytes.as_ptr(),
+                            chunk.bytes.as_ptr().cast::<u8>(),
                             dst_ptr.add(bytes_written),
                             bytes_to_copy,
                         );
@@ -78,10 +78,6 @@ impl CommandQueue {
     }
 
     pub(crate) fn apply(&mut self, world: &mut World) {
-        self.process_queue(Some(world));
-    }
-
-    fn process_queue(&mut self, mut world: Option<&mut World>) {
         if self.chunks.is_empty() {
             return;
         }
@@ -93,8 +89,7 @@ impl CommandQueue {
             while let Some(meta_chunk) = dyn_iter.next() {
                 unsafe {
                     let meta: CommandMeta = std::ptr::read(meta_chunk.bytes.as_ptr().cast());
-                    let world_feed = world.as_mut().map(|w| &mut **w);
-                    (meta.consume_and_advance)(&mut dyn_iter, world_feed);
+                    (meta.consume_and_advance)(&mut dyn_iter, Some(world));
                 }
             }
         }
@@ -104,7 +99,22 @@ impl CommandQueue {
 
 impl Drop for CommandQueue {
     fn drop(&mut self) {
-        self.process_queue(None);
+        if self.chunks.is_empty() {
+            return;
+        }
+
+        {
+            let mut chunks_iter = self.chunks.iter_mut();
+            let mut dyn_iter = &mut chunks_iter as &mut dyn Iterator<Item = &mut BufferChunk>;
+
+            while let Some(meta_chunk) = dyn_iter.next() {
+                unsafe {
+                    let meta: CommandMeta = std::ptr::read(meta_chunk.bytes.as_ptr().cast());
+                    (meta.consume_and_advance)(&mut dyn_iter, None);
+                }
+            }
+        }
+        self.chunks.clear();
     }
 }
 
@@ -115,18 +125,18 @@ struct StackCommandIterator {
 
 impl StackCommandIterator {
     fn new<C: WorldCommand>(meta: CommandMeta, command: C) -> Self {
-        let meta_size = mem::size_of::<CommandMeta>(); 
         let payload_size = mem::size_of::<C>();
         let total_chunks = 1 + payload_size.div_ceil(16);
         
-        let mut buffer = vec![BufferChunk { bytes: [0; 16] }; total_chunks];
+        let mut buffer = vec![BufferChunk { bytes: [MaybeUninit::uninit(); 16] }; total_chunks];
 
         unsafe {
             let buffer_ptr = buffer.as_mut_ptr().cast::<u8>();
-            std::ptr::copy_nonoverlapping(
-                &meta as *const CommandMeta as *const u8, 
-                buffer_ptr, 
-                meta_size
+            std::ptr::write_bytes(buffer_ptr, 0, total_chunks * 16);
+        
+            std::ptr::write(
+                buffer_ptr.cast::<unsafe fn(&mut dyn Iterator<Item = &mut BufferChunk>, Option<&mut World>)>(), 
+                meta.consume_and_advance
             );
             
             let command_manually_drop = ManuallyDrop::new(command);
