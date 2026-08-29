@@ -49,7 +49,7 @@ impl CommandQueue {
                     if let Some(chunk) = chunks_iter.next() {
                         let bytes_left = total_bytes_to_read - bytes_written;
                         let bytes_to_copy = bytes_left.min(16);
-                        
+
                         std::ptr::copy_nonoverlapping(
                             chunk.bytes.as_ptr().cast::<u8>(),
                             dst_ptr.add(bytes_written),
@@ -148,8 +148,10 @@ impl<C: WorldCommand> Iterator for StackCommandIterator<C> {
             return None;
         }
 
-        let mut chunk = BufferChunk { bytes: [MaybeUninit::uninit(); 16] };
-        
+        let mut chunk = BufferChunk {
+            bytes: [MaybeUninit::uninit(); 16],
+        };
+
         unsafe {
             let chunk_ptr = chunk.bytes.as_mut_ptr().cast::<u8>();
             std::ptr::write_bytes(chunk_ptr, 0, 16);

@@ -125,34 +125,30 @@ impl World {
     }
 
     pub fn apply_commands(&mut self) {
-        let commands = std::mem::replace(&mut self.commands, CommandBuffer::new());
-        {
-            commands.queue.write().unwrap().apply(self);
-            let despawns = commands.despawns.pin_owned();
-            for target in despawns.iter() {
-                unsafe {
-                    REGISTRY.decrement_handle(target.entity.registry_index as usize);
-                }
+        let queue_arc = self.commands.queue.clone();
+        let mut queue_gaurd = queue_arc.write().unwrap();
+        queue_gaurd.apply(self);
+        let despawns_arc = self.commands.despawns.clone();
+        let despawns = despawns_arc.pin();
+        despawns.retain(|despawn_cmd| {
+            unsafe {
+                REGISTRY.decrement_handle(despawn_cmd.entity.registry_index as usize);
             }
-
-            despawns.retain(|despawn_cmd| {
-                despawn_cmd.apply(self);
-                false
-            });
-        }
+            despawn_cmd.apply(self);
+            false
+        });
         self.free_indices_list.sort_by(|a, b| b.cmp(a));
-        self.commands = commands;
     }
 
     pub(crate) fn end_of_frame_sync(&mut self) {
         CurrentBufferIdx::advance();
         #[cfg(feature = "reactivity")]
-        self.clear_changed_tracker();
+        self.clear_trackers();
         self.clear_events();
     }
 
     #[cfg(feature = "reactivity")]
-    fn clear_changed_tracker(&mut self) {
+    fn clear_trackers(&mut self) {
         let tracked = TRACKED_COMPONENTS.read().unwrap();
 
         for archetype in self.archetypes_manager.archetypes.values_mut() {
