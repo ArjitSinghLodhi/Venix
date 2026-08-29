@@ -1,87 +1,65 @@
-use std::alloc::Layout;
+use crate::world::storage::World;
+use orx_concurrent_bag::ConcurrentBag;
 use std::mem::{self, MaybeUninit};
 use std::ptr;
-
-use crate::world::storage::World;
 
 pub(crate) trait WorldCommand: 'static + Send {
     fn apply(self, world: &mut World);
 }
 
 struct CommandMeta {
-    consume_and_advance: unsafe fn(payload_ptr: *mut u8, world: Option<&mut World>),
-    move_to_dest: unsafe fn(payload_ptr: *mut u8, dst: &mut CommandQueue),
-    payload_offset: usize,
-    block_size: usize,
+    consume_and_advance:
+        unsafe fn(payload_buf_ptr: *mut MaybeUninit<u64>, world: Option<&mut World>),
+    u64_count: usize,
+}
+
+#[repr(C)]
+struct ConfiguredCommand<C: WorldCommand> {
+    meta: CommandMeta,
+    payload: C,
 }
 
 #[derive(Default)]
 pub(crate) struct CommandQueue {
-    u64_chunks: Vec<MaybeUninit<u64>>,
+    u64_chunks: ConcurrentBag<MaybeUninit<u64>>,
 }
 
 impl CommandQueue {
     pub(crate) fn new() -> Self {
         Self {
-            u64_chunks: Vec::new(),
+            u64_chunks: ConcurrentBag::new(),
         }
     }
 
-    pub(crate) fn push<C: WorldCommand>(&mut self, command: C) {
-        let meta_layout = Layout::new::<CommandMeta>();
-        let payload_layout = Layout::new::<C>();
+    pub(crate) fn push<C: WorldCommand>(&self, command: C) {
+        let block_size = mem::size_of::<ConfiguredCommand<C>>();
+        let total_u64_count = block_size.div_ceil(mem::size_of::<u64>());
 
-        let (combined_layout, payload_offset) = meta_layout
-            .extend(payload_layout)
-            .expect("Command layout overflowed memory bounds");
+        let meta_u64_count = mem::size_of::<CommandMeta>().div_ceil(mem::size_of::<u64>());
+        let payload_u64_count = total_u64_count - meta_u64_count;
 
-        let final_layout = combined_layout.pad_to_align();
-        let block_size = final_layout.size();
-
-        let old_byte_len = self.u64_chunks.len() * mem::size_of::<u64>();
-        let meta_align = mem::align_of::<CommandMeta>();
-
-        let aligned_old_bytes = (old_byte_len + meta_align - 1) & !(meta_align - 1);
-        let padding_gap = aligned_old_bytes - old_byte_len;
-
-        let total_new_bytes = aligned_old_bytes + block_size;
-        let target_u64_count = total_new_bytes.div_ceil(mem::size_of::<u64>());
-
-        let old_u64_count = self.u64_chunks.len();
-        self.u64_chunks.reserve(target_u64_count - old_u64_count);
-
-        unsafe {
-            let base_alloc_ptr = self.u64_chunks.as_mut_ptr().cast::<u8>().add(old_byte_len);
-            ptr::write_bytes(base_alloc_ptr, 0, padding_gap);
-            let base_ptr = self
-                .u64_chunks
-                .as_mut_ptr()
-                .cast::<u8>()
-                .add(aligned_old_bytes);
-            let meta = CommandMeta {
-                payload_offset,
-                block_size,
-                consume_and_advance: |payload_ptr, world| {
-                    let command: C = ptr::read_unaligned(payload_ptr.cast());
-
-                    match world {
-                        Some(w) => command.apply(w),
-                        None => mem::drop(command),
-                    }
-                },
-                move_to_dest: |payload_ptr, dest| {
-                    let command: C = ptr::read_unaligned(payload_ptr.cast());
-                    dest.push(command);
-                },
-            };
-            ptr::write(base_ptr.cast::<CommandMeta>(), meta);
-            let payload_target = base_ptr.add(payload_offset).cast::<C>();
-            ptr::write_unaligned(payload_target, command);
-            self.u64_chunks.set_len(target_u64_count);
-        }
+        let meta = CommandMeta {
+            u64_count: payload_u64_count,
+            consume_and_advance: |payload_buf_ptr, world| unsafe {
+                let command: C = ptr::read_unaligned(payload_buf_ptr.cast());
+                match world {
+                    Some(w) => command.apply(w),
+                    None => mem::drop(command),
+                }
+            },
+        };
+        let stream_iter = StackCommandIterator {
+            command: ConfiguredCommand {
+                meta,
+                payload: command,
+            },
+            total_u64_count,
+            current_u64_idx: 0,
+        };
+        self.u64_chunks.extend(stream_iter);
     }
 
-    pub(crate) fn push_fn<F>(&mut self, f: F)
+    pub(crate) fn push_fn<F>(&self, f: F)
     where
         F: FnOnce(&mut World) + Send + 'static,
     {
@@ -89,30 +67,42 @@ impl CommandQueue {
     }
 
     pub(crate) fn apply(&mut self, world: &mut World) {
-        let total_bytes = self.u64_chunks.len() * mem::size_of::<u64>();
-        if total_bytes == 0 {
+        if self.u64_chunks.is_empty() {
             return;
         }
 
-        let mut local_cursor = 0;
-        let base_mut_ptr = self.u64_chunks.as_mut_ptr().cast::<u8>();
+        let meta_u64_size = mem::size_of::<CommandMeta>().div_ceil(mem::size_of::<u64>());
+        let mut stack_scratch = [MaybeUninit::<u64>::uninit(); 32];
+        let scratch_ptr = stack_scratch.as_mut_ptr().cast::<u8>();
 
-        while local_cursor < total_bytes {
-            unsafe {
-                let meta_align = mem::align_of::<CommandMeta>();
-                local_cursor = (local_cursor + meta_align - 1) & !(meta_align - 1);
+        {
+            let mut chunks_iter = self.u64_chunks.iter_mut();
 
-                if local_cursor >= total_bytes {
-                    break;
+            while let Some(first_chunk) = chunks_iter.next() {
+                unsafe {
+                    ptr::write(scratch_ptr.cast::<MaybeUninit<u64>>(), *first_chunk);
+                    for i in 1..meta_u64_size {
+                        if let Some(next_meta_chunk) = chunks_iter.next() {
+                            ptr::write(
+                                scratch_ptr.cast::<MaybeUninit<u64>>().add(i),
+                                *next_meta_chunk,
+                            );
+                        }
+                    }
+
+                    let meta: CommandMeta = ptr::read(scratch_ptr.cast());
+                    let payload_scratch_ptr = scratch_ptr
+                        .add(mem::size_of::<CommandMeta>())
+                        .cast::<MaybeUninit<u64>>();
+
+                    for i in 0..meta.u64_count {
+                        if let Some(payload_chunk) = chunks_iter.next() {
+                            ptr::write(payload_scratch_ptr.add(i), *payload_chunk);
+                        }
+                    }
+
+                    (meta.consume_and_advance)(payload_scratch_ptr, Some(world));
                 }
-
-                let base_ptr = base_mut_ptr.add(local_cursor);
-                let meta: CommandMeta = ptr::read(base_ptr.cast());
-                let payload_ptr = base_ptr.add(meta.payload_offset);
-
-                (meta.consume_and_advance)(payload_ptr, Some(world));
-
-                local_cursor += meta.block_size;
             }
         }
 
@@ -122,80 +112,103 @@ impl CommandQueue {
 
 impl Drop for CommandQueue {
     fn drop(&mut self) {
-        let total_bytes = self.u64_chunks.len() * mem::size_of::<u64>();
-        if total_bytes == 0 {
+        if self.u64_chunks.is_empty() {
             return;
         }
 
-        let mut local_cursor = 0;
-        let base_mut_ptr = self.u64_chunks.as_mut_ptr().cast::<u8>();
+        let mut chunks_iter = self.u64_chunks.iter_mut();
+        let meta_u64_size = mem::size_of::<CommandMeta>().div_ceil(mem::size_of::<u64>());
+        let mut stack_scratch = [MaybeUninit::<u64>::uninit(); 32];
+        let scratch_ptr = stack_scratch.as_mut_ptr().cast::<u8>();
 
-        while local_cursor < total_bytes {
+        while let Some(first_chunk) = chunks_iter.next() {
             unsafe {
-                let meta_align = mem::align_of::<CommandMeta>();
-                local_cursor = (local_cursor + meta_align - 1) & !(meta_align - 1);
-
-                if local_cursor >= total_bytes {
-                    break;
+                ptr::write(scratch_ptr.cast::<MaybeUninit<u64>>(), *first_chunk);
+                for i in 1..meta_u64_size {
+                    if let Some(next_meta_chunk) = chunks_iter.next() {
+                        ptr::write(
+                            scratch_ptr.cast::<MaybeUninit<u64>>().add(i),
+                            *next_meta_chunk,
+                        );
+                    }
                 }
 
-                let base_ptr = base_mut_ptr.add(local_cursor);
-                let meta: CommandMeta = ptr::read(base_ptr.cast());
-                let payload_ptr = base_ptr.add(meta.payload_offset);
+                let meta: CommandMeta = ptr::read(scratch_ptr.cast());
+                let payload_scratch_ptr = scratch_ptr
+                    .add(mem::size_of::<CommandMeta>())
+                    .cast::<MaybeUninit<u64>>();
 
-                (meta.consume_and_advance)(payload_ptr, None);
+                for i in 0..meta.u64_count {
+                    if let Some(payload_chunk) = chunks_iter.next() {
+                        ptr::write(payload_scratch_ptr.add(i), *payload_chunk);
+                    }
+                }
 
-                local_cursor += meta.block_size;
+                (meta.consume_and_advance)(payload_scratch_ptr, None);
             }
         }
     }
 }
 
-impl CommandQueue {
-    pub(crate) fn is_empty(&self) -> bool {
-        self.u64_chunks.is_empty()
-    }
+struct StackCommandIterator<C: WorldCommand> {
+    command: ConfiguredCommand<C>,
+    total_u64_count: usize,
+    current_u64_idx: usize,
+}
 
-    pub(crate) fn clear_bytes(&mut self) {
-        self.u64_chunks.clear();
-    }
+impl<C: WorldCommand> Iterator for StackCommandIterator<C> {
+    type Item = MaybeUninit<u64>;
 
-    pub(crate) fn merge(&mut self, other: &mut CommandQueue) {
-        if other.is_empty() {
-            return;
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_u64_idx >= self.total_u64_count {
+            return None;
         }
 
-        let total_bytes = other.u64_chunks.len() * mem::size_of::<u64>();
-        let mut local_cursor = 0;
-        let base_mut_ptr = other.u64_chunks.as_mut_ptr().cast::<u8>();
+        let byte_offset = self.current_u64_idx * mem::size_of::<u64>();
+        let mut target_u64 = MaybeUninit::<u64>::uninit();
 
-        while local_cursor < total_bytes {
-            unsafe {
-                let meta_align = mem::align_of::<CommandMeta>();
-                local_cursor = (local_cursor + meta_align - 1) & !(meta_align - 1);
+        unsafe {
+            let source_ptr = (&self.command as *const ConfiguredCommand<C>).cast::<u8>();
+            let out_ptr = target_u64.as_mut_ptr().cast::<u8>();
+            let struct_size = mem::size_of::<ConfiguredCommand<C>>();
+            let bytes_left = struct_size.saturating_sub(byte_offset);
 
-                if local_cursor >= total_bytes {
-                    break;
+            if bytes_left >= mem::size_of::<u64>() {
+                ptr::copy_nonoverlapping(
+                    source_ptr.add(byte_offset),
+                    out_ptr,
+                    mem::size_of::<u64>(),
+                );
+            } else {
+                ptr::write_bytes(out_ptr, 0, mem::size_of::<u64>());
+                if bytes_left > 0 {
+                    ptr::copy_nonoverlapping(source_ptr.add(byte_offset), out_ptr, bytes_left);
                 }
-                let base_ptr = base_mut_ptr.add(local_cursor);
-                let meta: CommandMeta = ptr::read(base_ptr.cast());
-                let payload_ptr = base_ptr.add(meta.payload_offset);
-                (meta.move_to_dest)(payload_ptr, self);
-                local_cursor += meta.block_size;
             }
         }
-        other.clear_bytes();
+
+        self.current_u64_idx += 1;
+        Some(target_u64)
+    }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.total_u64_count - self.current_u64_idx;
+        (remaining, Some(remaining))
     }
 }
+
+impl<C: WorldCommand> ExactSizeIterator for StackCommandIterator<C> {}
 
 struct FunctionCommand<F>
 where
-    F: FnOnce(&mut World),
+    F: FnOnce(&mut World) + Send + 'static,
 {
     func: F,
 }
 
-impl<T: Send + 'static + for<'a> FnOnce(&'a mut World)> WorldCommand for FunctionCommand<T> {
+impl<F: FnOnce(&mut World) + Send + 'static> WorldCommand for FunctionCommand<F> {
     fn apply(self, world: &mut World) {
         (self.func)(world)
     }

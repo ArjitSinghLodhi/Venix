@@ -1,16 +1,11 @@
 use std::{
     any::TypeId,
-    cell::UnsafeCell,
-    ptr::NonNull,
-    sync::{
-        Arc, RwLock,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, RwLock, RwLockReadGuard},
 };
 
-use fxhash::{FxBuildHasher, FxHashMap, FxHashSet};
+use fxhash::{FxBuildHasher, FxHashMap};
 use indexmap::{IndexMap, IndexSet};
-use thread_local::ThreadLocal;
+use papaya::{HashSet, HashSetRef, LocalGuard};
 
 use crate::{
     commands::{
@@ -536,54 +531,28 @@ unsafe fn erase_subtracted_markers(
     }
 }
 
-pub(crate) struct CommandsBufferData {
-    pub(crate) queue: CommandQueue,
-    pub(crate) despawns: FxHashSet<DespawnCommand>,
-}
-
-impl CommandsBufferData {
-    pub(crate) fn new() -> Self {
-        Self {
-            queue: CommandQueue::new(),
-            despawns: FxHashSet::default(),
-        }
-    }
-}
-pub(crate) struct LocalSlot {
-    pub(crate) is_busy: AtomicBool,
-    pub(crate) data: UnsafeCell<CommandsBufferData>,
-}
 pub(crate) struct CommandBuffer {
-    pub(crate) data: RwLock<CommandsBufferData>,
-    pub(crate) local_data: ThreadLocal<LocalSlot>,
+    pub(crate) queue: Arc<RwLock<CommandQueue>>,
+    pub(crate) despawns: Arc<HashSet<DespawnCommand, FxBuildHasher>>,
 }
 
 impl CommandBuffer {
     pub fn new() -> Self {
         Self {
-            data: RwLock::new(CommandsBufferData::new()),
-            local_data: ThreadLocal::new(),
+            queue: Arc::new(RwLock::new(CommandQueue::new())),
+            despawns: Arc::new(HashSet::with_hasher(FxBuildHasher::new())),
         }
     }
 }
 
-pub(crate) enum CommandsOrigin {
-    ThreadLocal(*const AtomicBool),
-    HeapFallback(NonNull<CommandsBufferData>),
-}
-
 pub struct Commands<'a> {
-    pub(crate) local_data: NonNull<CommandsBufferData>,
-    pub(crate) origin: CommandsOrigin,
-    pub(crate) master_buffer: Arc<CommandBuffer>,
-    pub(crate) _marker: std::marker::PhantomData<&'a mut CommandsBufferData>,
+    pub(crate) queue: RwLockReadGuard<'a, CommandQueue>,
+    pub(crate) despawns: HashSetRef<'a, DespawnCommand, FxBuildHasher, LocalGuard<'a>>,
 }
 
 impl Commands<'_> {
     fn push<C: WorldCommand + 'static>(&mut self, command: C) {
-        unsafe {
-            self.local_data.as_mut().queue.push(command);
-        }
+        self.queue.push(command);
     }
 
     pub fn spawn<B: ComponentBundle + Send>(&mut self, components: B) {
@@ -591,12 +560,7 @@ impl Commands<'_> {
     }
 
     pub fn despawn(&mut self, entity: Entity) {
-        unsafe {
-            self.local_data
-                .as_mut()
-                .despawns
-                .insert(DespawnCommand { entity });
-        }
+        self.despawns.insert(DespawnCommand { entity });
     }
 
     pub fn add_components<C: ComponentBundle + Send>(&mut self, entity: Entity, components: C) {
@@ -618,29 +582,16 @@ impl Commands<'_> {
     where
         F: for<'b> FnMut(&'b Entity),
     {
-        let buff = self.master_buffer.data.read().unwrap();
-        for cmd in buff.despawns.iter() {
+        for cmd in self.despawns.iter() {
             f(cmd.despawn_target())
         }
     }
 
-    pub fn despawn_iter_local<F>(&self, mut f: F)
-    where
-        F: for<'b> FnMut(&'b Entity),
-    {
-        unsafe {
-            for cmd in self.local_data.as_ref().despawns.iter() {
-                f(cmd.despawn_target())
-            }
-        }
-    }
     pub(crate) fn push_fn<F>(&mut self, f: F)
     where
         F: FnOnce(&mut World) + Send + 'static,
     {
-        unsafe {
-            self.local_data.as_mut().queue.push_fn(f);
-        }
+        self.queue.push_fn(f);
     }
 
     pub fn insert_resource<T: 'static + Send>(&mut self, resource: T) {
@@ -660,61 +611,14 @@ impl<'a> SystemParam for Commands<'a> {
     }
 
     fn extract(world: &mut World, _data: &mut FunctionData) -> Self {
-        let master_buffer_ptr = Arc::clone(&world.commands);
-        let master_ref = &master_buffer_ptr;
-        let slot = master_ref.local_data.get_or(|| LocalSlot {
-            is_busy: AtomicBool::new(false),
-            data: UnsafeCell::new(CommandsBufferData::new()),
-        });
-        if slot
-            .is_busy
-            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
-            .is_ok()
-        {
-            Self {
-                local_data: unsafe { NonNull::new_unchecked(slot.data.get()) },
-                origin: CommandsOrigin::ThreadLocal(&slot.is_busy as *const AtomicBool),
-                master_buffer: master_buffer_ptr,
-                _marker: std::marker::PhantomData,
-            }
-        } else {
-            let heap_box = Box::new(CommandsBufferData::new());
-            let heap_ptr = unsafe { NonNull::new_unchecked(Box::into_raw(heap_box)) };
+        let queue_local = world.commands.queue.read().unwrap();
+        let despawns_local = world.commands.despawns.pin();
 
-            Self {
-                local_data: heap_ptr,
-                origin: CommandsOrigin::HeapFallback(heap_ptr),
-                master_buffer: master_buffer_ptr,
-                _marker: std::marker::PhantomData,
-            }
-        }
-    }
-}
-
-impl<'a> Drop for Commands<'a> {
-    fn drop(&mut self) {
         unsafe {
-            let data_ref = self.local_data.as_mut();
-            if !data_ref.queue.is_empty() || !data_ref.despawns.is_empty() {
-                let mut master_data = self.master_buffer.data.write().unwrap();
+            let queue = std::mem::transmute(queue_local);
+            let despawns = std::mem::transmute(despawns_local);
 
-                if !data_ref.queue.is_empty() {
-                    master_data.queue.merge(&mut data_ref.queue);
-                    data_ref.queue.clear_bytes();
-                }
-
-                if !data_ref.despawns.is_empty() {
-                    master_data.despawns.extend(data_ref.despawns.drain());
-                }
-            }
-            match self.origin {
-                CommandsOrigin::ThreadLocal(is_busy_flag) => {
-                    (*is_busy_flag).store(false, Ordering::Relaxed);
-                }
-                CommandsOrigin::HeapFallback(heap_ptr) => {
-                    let _cleanup = Box::from_raw(heap_ptr.as_ptr());
-                }
-            }
+            Self { queue, despawns }
         }
     }
 }

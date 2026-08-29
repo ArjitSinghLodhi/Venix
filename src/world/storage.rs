@@ -1,14 +1,15 @@
 use fxhash::FxHashMap;
 use std::{
     any::{TypeId, type_name},
-    sync::{
-        Arc,
-        atomic::{AtomicU8, Ordering},
-    },
+    sync::atomic::{AtomicU8, Ordering},
 };
 
 use crate::{
-    commands::{CommandBuffer, ParallelCommands, bundle::ComponentBundle}, events::{ParallelEventReader, ParallelEventWriter, TRACKED_EVENTS}, extensions::{FunctionData, SystemParam}, registry::REGISTRY, world::archetypes::{ArchetypeId, ArchetypeManager}
+    commands::{CommandBuffer, DespawnCommand, ParallelCommands, bundle::ComponentBundle},
+    events::{ParallelEventReader, ParallelEventWriter, TRACKED_EVENTS},
+    extensions::{FunctionData, SystemParam},
+    registry::REGISTRY,
+    world::archetypes::{ArchetypeId, ArchetypeManager},
 };
 
 #[cfg(feature = "reactivity")]
@@ -40,7 +41,7 @@ pub struct World {
     pub(crate) archetypes_manager: ArchetypeManager,
     pub(crate) resources:
         FxHashMap<std::any::TypeId, std::cell::UnsafeCell<Box<dyn std::any::Any>>>,
-    pub(crate) commands: Arc<CommandBuffer>,
+    pub(crate) commands: CommandBuffer,
     pub(crate) free_indices_list: Vec<u32>,
 }
 
@@ -49,7 +50,7 @@ impl World {
         Self {
             archetypes_manager: ArchetypeManager::new(),
             resources: FxHashMap::default(),
-            commands: Arc::new(CommandBuffer::new()),
+            commands: CommandBuffer::new(),
             free_indices_list: Vec::new(),
         }
     }
@@ -124,20 +125,25 @@ impl World {
     }
 
     pub fn apply_commands(&mut self) {
-        let commands = std::mem::replace(&mut self.commands, CommandBuffer::new().into());
+        let commands = std::mem::replace(&mut self.commands, CommandBuffer::new());
+        {
+            commands.queue.write().unwrap().apply(self);
+            let despawns = commands.despawns.pin_owned();
+            for target in despawns.iter() {
+                unsafe {
+                    REGISTRY.decrement_handle(target.entity.registry_index as usize);
+                }
+            }
 
-        commands.data.write().unwrap().queue.apply(self);
-
-        for target in commands.data.write().unwrap().despawns.iter() {
-            unsafe {
-                REGISTRY.decrement_handle(target.entity.registry_index as usize);
+            for despawn_target_ref in despawns.iter() {
+                unsafe {
+                    let despawn_target =
+                        std::ptr::read(despawn_target_ref as *const DespawnCommand);
+                    despawns.remove(&despawn_target);
+                    despawn_target.apply(self);
+                }
             }
         }
-
-        for despawn_target in commands.data.write().unwrap().despawns.drain() {
-            despawn_target.apply(self);
-        }
-
         self.free_indices_list.sort_by(|a, b| b.cmp(a));
         self.commands = commands;
     }
@@ -182,11 +188,15 @@ impl World {
         ParallelCommands::extract(self, &mut FunctionData::new())
     }
 
-    pub(crate) fn get_par_event_writer<T: 'static + Send + Sync>(&mut self) -> ParallelEventWriter<T> {
+    pub(crate) fn get_par_event_writer<T: 'static + Send + Sync>(
+        &mut self,
+    ) -> ParallelEventWriter<T> {
         ParallelEventWriter::extract(self, &mut FunctionData::new())
-    } 
+    }
 
-    pub(crate) fn get_par_event_reader<T: 'static + Send + Sync>(&mut self) -> ParallelEventReader<T> {
+    pub(crate) fn get_par_event_reader<T: 'static + Send + Sync>(
+        &mut self,
+    ) -> ParallelEventReader<T> {
         ParallelEventReader::extract(self, &mut FunctionData::new())
     }
 }

@@ -1,16 +1,17 @@
-use crate::commands::commands::{
-    CommandBuffer, Commands, CommandsBufferData, CommandsOrigin, LocalSlot,
-};
+use fxhash::FxBuildHasher;
+use papaya::HashSet;
+
+use crate::commands::DespawnCommand;
+use crate::commands::command_queue::CommandQueue;
+use crate::commands::commands::Commands;
 use crate::extensions::{ParamAccess, SystemParam};
 use crate::system::validation::FunctionData;
 use crate::world::storage::World;
-use std::cell::UnsafeCell;
-use std::ptr::NonNull;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 
 pub struct ParallelCommands {
-    pub(crate) master_buffer: Arc<CommandBuffer>,
+    pub(crate) queue: Arc<RwLock<CommandQueue>>,
+    pub(crate) despawns: Arc<HashSet<DespawnCommand, FxBuildHasher>>,
 }
 
 unsafe impl Send for ParallelCommands {}
@@ -23,7 +24,8 @@ impl SystemParam for ParallelCommands {
 
     fn extract(world: &mut World, _data: &mut FunctionData) -> Self {
         Self {
-            master_buffer: Arc::clone(&world.commands),
+            queue: world.commands.queue.clone(),
+            despawns: world.commands.despawns.clone(),
         }
     }
 }
@@ -33,34 +35,10 @@ impl ParallelCommands {
     where
         F: for<'b> FnOnce(Commands<'b>) -> R,
     {
-        let slot = self.master_buffer.local_data.get_or(|| LocalSlot {
-            is_busy: AtomicBool::new(false),
-            data: UnsafeCell::new(CommandsBufferData::new()),
-        });
-
-        if slot
-            .is_busy
-            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
-            .is_ok()
-        {
-            let commands = Commands {
-                local_data: unsafe { NonNull::new_unchecked(slot.data.get()) },
-                origin: CommandsOrigin::ThreadLocal(&slot.is_busy as *const AtomicBool),
-                master_buffer: self.master_buffer.clone(),
-                _marker: std::marker::PhantomData,
-            };
-            f(commands)
-        } else {
-            let heap_box = Box::new(CommandsBufferData::new());
-            let heap_ptr = unsafe { NonNull::new_unchecked(Box::into_raw(heap_box)) };
-
-            let commands = Commands {
-                local_data: heap_ptr,
-                origin: CommandsOrigin::HeapFallback(heap_ptr),
-                master_buffer: self.master_buffer.clone(),
-                _marker: std::marker::PhantomData,
-            };
-            f(commands)
-        }
+        let commands = Commands {
+            queue: self.queue.read().unwrap(),
+            despawns: self.despawns.pin(),
+        };
+        f(commands)
     }
 }
