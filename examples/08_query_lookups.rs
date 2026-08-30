@@ -1,6 +1,3 @@
-#[cfg(feature = "reactivity")]
-compile_error!("🛑 This example cannot be compiled when 'reactivity' feature is on due to type changes introduced by the feature.");
-
 use venix::prelude::*;
 
 struct PlayerTag;
@@ -43,7 +40,8 @@ fn simple_global_lookup_system(
 ) {
     for view in query_player.iter() {
         for (entity, _tag) in view.iter() {
-            if let Some(health) = query_health.get_mut(entity) {
+            #[allow(unused_mut)]
+            if let Some(mut health) = query_health.get_mut(entity) {
                 if health.0 == 100 {
                     println!("\n[Simple Lookup] Executing global Query-level O(1) map fetch:");
                     println!("   -> Located Player Entity via view extraction loop.");
@@ -71,7 +69,8 @@ fn complex_coordinated_view_lookup_system(
 
     for mut view in query_health.iter_mut() {
         for target in &targets_to_process {
-            if let Some(health) = view.get_mut(&target.0) {
+            #[allow(unused_mut)]
+            if let Some(mut health) = view.get_mut(&target.0) {
                 if health.0 == 500 {
                     println!("\n[Complex Coordinated Lookup] Executing vector-staged View-level array fetch:");
                     println!("   -> Pulling vector targets directly from active Archetype View matrix.");
@@ -92,7 +91,9 @@ fn zero_allocation_nested_lookup_system(
     for boss_view in query_boss.iter() {
         for (entity, _tag) in boss_view.iter() {
             for mut health_view in query_health.iter_mut() {
-                if let Some(health) = health_view.get_mut(entity) {
+                #[allow(unused_mut)]
+                if let Some(mut health) = health_view.get_mut(entity) {
+                    #[allow(unused_mut)]
                     if health.0 == 1000 {
                         println!("\n[Zero-Allocation Nested Lookup] Executing zero-heap nested array match:");
                         println!("   -> Completely bypassed staging vectors; streaming directly across views.");

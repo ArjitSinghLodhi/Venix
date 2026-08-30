@@ -1,6 +1,3 @@
-#[cfg(feature = "reactivity")]
-compile_error!("🛑 This example cannot be compiled when 'reactivity' feature is on due to type changes introduced by the feature.");
-
 use venix::prelude::*;
 use rayon::iter::ParallelIterator;
 
@@ -58,7 +55,8 @@ fn parallel_write_system(mut query: Query<(&mut Position, &Velocity)>) {
     let start = std::time::Instant::now();
 
     query.par_iter_mut().for_each(|mut view| {
-        for (pos, vel) in view.iter_mut() {
+        #[allow(unused_mut)]
+        for (mut pos, vel) in view.iter_mut() {
             pos.x += vel.x;
             pos.y += vel.y;
         }
@@ -82,7 +80,8 @@ fn parallel_chunk_write_system(mut query: Query<(&mut Position, &Velocity)>) {
     for mut view in query.iter_mut() {
         view.par_chunks_mut(5000).for_each(|mut sub_chunk| {
             let mut modified = 0;
-            for (pos, vel) in sub_chunk.iter_mut() {
+            #[allow(unused_mut)]
+            for (mut pos, vel) in sub_chunk.iter_mut() {
                 pos.x += vel.x;
                 pos.y += vel.y;
                 modified += 1;

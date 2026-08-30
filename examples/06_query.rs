@@ -1,6 +1,3 @@
-#[cfg(feature = "reactivity")]
-compile_error!("🛑 This example cannot be compiled when 'reactivity' feature is on due to type changes introduced by the feature.");
-
 use venix::prelude::*;
 
 #[allow(dead_code)]
@@ -54,7 +51,8 @@ fn sequential_write_system(mut query: Query<(&mut Position, &Velocity)>) {
     let mut count = 0;
 
     for mut view in query.iter_mut() {
-        for (pos, vel) in view.iter_mut() {
+        #[allow(unused_mut)]
+        for (mut pos, vel) in view.iter_mut() {
             pos.x += vel.x;
             pos.y += vel.y;
             count += 1;
