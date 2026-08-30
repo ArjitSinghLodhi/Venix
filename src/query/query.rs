@@ -50,6 +50,14 @@ impl<'w, Q: QueryData, T> QuerySubChunk<'w, Q, T> {
             .iter()
             .map(move |&idx| unsafe { safe_fetch.fetch_read_only(idx) })
     }
+
+    pub fn len(&self) -> usize {
+        self.sub_indices.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl<'w, Q: QueryData> QuerySubChunk<'w, Q, Mutable> {
@@ -235,19 +243,24 @@ impl<'a, Q: QueryData> QueryArchetypeView<'a, Q, Mutable> {
     }
 }
 
-struct ThreadSafePtr<T>(*const T);
-unsafe impl<T> Send for ThreadSafePtr<T> {}
-unsafe impl<T> Sync for ThreadSafePtr<T> {}
+unsafe impl<'a, Q: QueryData, T> Send for QueryArchetypeView<'a, Q, T> {}
+unsafe impl<'a, Q: QueryData, T> Sync for QueryArchetypeView<'a, Q, T> {}
 
-impl<T> Clone for ThreadSafePtr<T> {
+struct ThreadSafe<T>(T);
+unsafe impl<T> Send for ThreadSafe<T> {}
+unsafe impl<T> Sync for ThreadSafe<T> {}
+
+impl<T: Clone> Clone for ThreadSafe<T> {
     fn clone(&self) -> Self {
-        ThreadSafePtr(self.0.clone())
+        ThreadSafe(self.0.clone())
     }
 }
 
+impl<T: Copy> Copy for ThreadSafe<T> {}
+
 pub struct Query<'q, Q: QueryData, F: QueryFilter = EmptyQueryFilter> {
-    matching_archetypes: Vec<Option<ThreadSafePtr<Archetype>>>,
-    cached_fetches: Vec<Option<Q::Fetch>>,
+    matching_archetypes: Vec<Option<ThreadSafe<*const Archetype>>>,
+    cached_fetches: Vec<Option<ThreadSafe<Q::Fetch>>>,
     cached_indices: Vec<Vec<usize>>,
     _marker: std::marker::PhantomData<(&'q (), F)>,
 }
@@ -268,9 +281,9 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
                 })
             {
                 matching_archetypes[arch_id as usize] =
-                    Some(ThreadSafePtr(arch as *const Archetype));
+                    Some(ThreadSafe(arch as *const Archetype));
                 let fetch = unsafe { Q::init_fetch(arch, system_data) };
-                cached_fetches[arch_id as usize] = Some(fetch);
+                cached_fetches[arch_id as usize] = Some(ThreadSafe(fetch));
                 let mut indices = (0..arch.entities.len()).collect::<Vec<usize>>();
                 F::filter_indices(arch, &mut indices, system_data);
                 cached_indices[arch_id as usize] = indices;
@@ -295,7 +308,7 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
 
                 QueryArchetypeView {
                     indices: &self.cached_indices[arch_idx],
-                    fetch: self.cached_fetches[arch_idx].unwrap(),
+                    fetch: self.cached_fetches[arch_idx].unwrap().0,
                     archetype_id: arch.id,
                     _marker: PhantomData,
                 }
@@ -305,8 +318,6 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
     pub fn par_iter<'a>(
         &'a self,
     ) -> impl ParallelIterator<Item = QueryArchetypeView<'a, Q, ReadOnly>>
-    where
-        <Q as QueryData>::Fetch: Send,
     {
         self.matching_archetypes
             .par_iter()
@@ -316,7 +327,7 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
                 let arch_idx = arch.id() as usize;
                 QueryArchetypeView {
                     indices: &self.cached_indices[arch_idx],
-                    fetch: self.cached_fetches[arch_idx].unwrap(),
+                    fetch: self.cached_fetches[arch_idx].unwrap().0,
                     archetype_id: arch.id,
                     _marker: PhantomData,
                 }
@@ -336,7 +347,7 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
 
                 QueryArchetypeView {
                     indices: &cached_indices[arch_idx],
-                    fetch: cached_fetches[arch_idx].unwrap(),
+                    fetch: cached_fetches[arch_idx].unwrap().0,
                     archetype_id: arch.id,
                     _marker: PhantomData,
                 }
@@ -346,8 +357,6 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
     pub fn par_iter_mut<'a>(
         &'a mut self,
     ) -> impl ParallelIterator<Item = QueryArchetypeView<'a, Q, Mutable>>
-    where
-        <Q as QueryData>::Fetch: Send + Sync,
     {
         self.matching_archetypes
             .par_iter_mut()
@@ -357,7 +366,7 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
                 let arch_idx = arch.id() as usize;
                 QueryArchetypeView {
                     indices: &self.cached_indices[arch_idx],
-                    fetch: self.cached_fetches[arch_idx].unwrap(),
+                    fetch: self.cached_fetches[arch_idx].unwrap().0,
                     archetype_id: arch.id,
                     _marker: PhantomData,
                 }
@@ -371,7 +380,7 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
             let arch_id = (*cell_ptr).archetype_id;
             let row_idx = (*cell_ptr).idx;
 
-            let fetch = self.cached_fetches[arch_id.id() as usize]?;
+            let fetch = self.cached_fetches[arch_id.id() as usize]?.0;
             Some(Q::fetch_read_only(fetch, row_idx as usize))
         }
     }
@@ -383,7 +392,7 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
             let arch_id = (*cell_ptr).archetype_id;
             let row_idx = (*cell_ptr).idx;
 
-            let fetch = self.cached_fetches[arch_id.id() as usize]?;
+            let fetch = self.cached_fetches[arch_id.id() as usize]?.0;
             Some(Q::fetch_mut(fetch, row_idx as usize))
         }
     }
@@ -395,7 +404,7 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
             let arch_id = (*cell_ptr).archetype_id;
             let row_idx = (*cell_ptr).idx;
 
-            let fetch = self.cached_fetches[arch_id.id() as usize].unwrap_unchecked();
+            let fetch = self.cached_fetches[arch_id.id() as usize].unwrap_unchecked().0;
             Q::fetch_read_only(fetch, row_idx as usize)
         }
     }
@@ -407,7 +416,7 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
             let arch_id = (*cell_ptr).archetype_id;
             let row_idx = (*cell_ptr).idx;
 
-            let fetch = self.cached_fetches[arch_id.id() as usize].unwrap_unchecked();
+            let fetch = self.cached_fetches[arch_id.id() as usize].unwrap_unchecked().0;
             Q::fetch_mut(fetch, row_idx as usize)
         }
     }

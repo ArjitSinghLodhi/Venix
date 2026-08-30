@@ -125,70 +125,51 @@ fn parallel_execution_system(
         let mut nest_read_a_count = 0;
         let mut nest_read_b_count = 0;
 
-        thread::scope(|s| {
-            let r_a_ref = &reader_a;
-            let r_b_ref = &reader_b;
-            let pw_a_ref = &par_writer_a;
-            let pw_b_ref = &par_writer_b;
-            let pr_a_ref = &par_reader_a;
-            let pr_b_ref = &par_reader_b;
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                par_writer_a.scope(|mut writer| {
+                    writer.send(ThreatEvent { value: 10.0 });
 
-            s.spawn(move || {
-                pw_a_ref.scope(|mut sw_a| {
-                    sw_a.send(ThreatEvent { value: 10.0 });
-
-                    pw_b_ref.scope(|mut sw_b| {
+                    par_writer_b.scope(|mut writer| {
                         for _ in 0..4 {
-                            sw_b.send(ThreatEvent { value: 10.0 });
-                        }
-                    });
-                });
-            });
-
-            s.spawn(move || {
-                pw_b_ref.scope(|mut sw_b| {
-                    sw_b.send(ThreatEvent { value: 10.0 });
-
-                    pw_a_ref.scope(|mut sw_a| {
-                        for _ in 0..4 {
-                            sw_a.send(ThreatEvent { value: 10.0 });
+                            writer.send(ThreatEvent { value: 10.0 });
                         }
                     });
                 });
             });
 
             s.spawn(|| {
-                read_a_count = r_a_ref.read().count();
-                read_b_count = r_b_ref.read().count();
+                par_writer_b.scope(|mut writer| {
+                    writer.send(ThreatEvent { value: 10.0 });
+
+                    par_writer_a.scope(|mut writer| {
+                        for _ in 0..4 {
+                            writer.send(ThreatEvent { value: 10.0 });
+                        }
+                    });
+                });
             });
 
             s.spawn(|| {
-                pr_a_ref.scope(|sr_a| {
-                    nest_read_a_count = sr_a.read().count();
+                read_a_count = reader_a.read().count();
+                read_b_count = reader_b.read().count();
+            });
 
-                    pr_b_ref.scope(|sr_b| {
-                        nest_read_b_count = sr_b.read().count();
+            s.spawn(|| {
+                par_reader_a.scope(|reader| {
+                    nest_read_a_count = reader.read().count();
+
+                    par_reader_b.scope(|reader| {
+                        nest_read_b_count = reader.read().count();
                     });
                 });
             });
         });
 
-        assert_eq!(
-            read_a_count, 0,
-            "❌ EventReader A leaked un-flushed inline events on Frame 1!"
-        );
-        assert_eq!(
-            read_b_count, 0,
-            "❌ EventReader B leaked un-flushed inline events on Frame 1!"
-        );
-        assert_eq!(
-            nest_read_a_count, 0,
-            "❌ Nested ParallelEventReader A leaked un-flushed inline events on Frame 1!"
-        );
-        assert_eq!(
-            nest_read_b_count, 0,
-            "❌ Nested ParallelEventReader B leaked un-flushed inline events on Frame 1!"
-        );
+        assert_eq!(read_a_count, 0);
+        assert_eq!(read_b_count, 0);
+        assert_eq!(nest_read_a_count, 0);
+        assert_eq!(nest_read_b_count, 0);
     }
 }
 
@@ -220,15 +201,13 @@ fn parallel_verification_system(
         assert_eq!(parallel_count, 10);
 
         thread::scope(|s| {
-            let pr_a_ref = &par_reader_a;
-            let pr_b_ref = &par_reader_b;
 
             s.spawn(|| {
-                pr_a_ref.scope(|sr_a| {
-                    nest_read_a_count = sr_a.read().count();
+                par_reader_a.scope(|reader_a| {
+                    nest_read_a_count = reader_a.read().count();
 
-                    pr_b_ref.scope(|sr_b| {
-                        nest_read_b_count = sr_b.read().count();
+                    par_reader_b.scope(|reader_b| {
+                        nest_read_b_count = reader_b.read().count();
                     });
                 });
             });

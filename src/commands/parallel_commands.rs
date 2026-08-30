@@ -9,6 +9,7 @@ use crate::system::validation::FunctionData;
 use crate::world::storage::World;
 use std::sync::{Arc, RwLock};
 
+#[derive(Clone)]
 pub struct ParallelCommands {
     pub(crate) queue: Arc<RwLock<CommandQueue>>,
     pub(crate) despawns: Arc<HashSet<DespawnCommand, FxBuildHasher>>,

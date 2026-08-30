@@ -242,14 +242,10 @@ impl App {
     }
 
     pub fn get_par_event_writer<T: 'static + Send + Sync>(&mut self) -> ParallelEventWriter<T> {
-        self.configuration.built();
-        self.configuration.ran_startup();
         self.world.get_par_event_writer::<T>()
     }
 
     pub fn get_par_event_reader<T: 'static + Send + Sync>(&mut self) -> ParallelEventReader<T> {
-        self.configuration.built();
-        self.configuration.ran_startup();
         self.world.get_par_event_reader::<T>()
     }
 }

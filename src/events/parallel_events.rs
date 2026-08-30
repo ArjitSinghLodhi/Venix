@@ -5,6 +5,7 @@ use crate::{
     extensions::{FunctionData, ParamAccess, SystemParam, World},
 };
 
+#[derive(Clone)]
 pub struct ParallelEventWriter<T: 'static + Send + Sync> {
     write_buffer: Arc<RwLock<EventQueue<T>>>,
 }
@@ -38,6 +39,7 @@ impl<T: 'static + Send + Sync> SystemParam for ParallelEventWriter<T> {
 unsafe impl<T: 'static + Send + Sync> Send for ParallelEventWriter<T> {}
 unsafe impl<T: 'static + Send + Sync> Sync for ParallelEventWriter<T> {}
 
+#[derive(Clone)]
 pub struct ParallelEventReader<T: 'static + Send + Sync> {
     read_buffer: Arc<RwLock<EventQueue<T>>>,
 }

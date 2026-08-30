@@ -176,17 +176,17 @@ impl World {
         }
     }
 
-    pub(crate) fn get_par_commands(&mut self) -> ParallelCommands {
+    pub fn get_par_commands(&mut self) -> ParallelCommands {
         ParallelCommands::extract(self, &mut FunctionData::new())
     }
 
-    pub(crate) fn get_par_event_writer<T: 'static + Send + Sync>(
+    pub fn get_par_event_writer<T: 'static + Send + Sync>(
         &mut self,
     ) -> ParallelEventWriter<T> {
         ParallelEventWriter::extract(self, &mut FunctionData::new())
     }
 
-    pub(crate) fn get_par_event_reader<T: 'static + Send + Sync>(
+    pub fn get_par_event_reader<T: 'static + Send + Sync>(
         &mut self,
     ) -> ParallelEventReader<T> {
         ParallelEventReader::extract(self, &mut FunctionData::new())

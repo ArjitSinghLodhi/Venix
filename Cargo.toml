@@ -1,6 +1,6 @@
 [package]
 name = "venix"
-version = "2.1.8"
+version = "2.2.0"
 edition = "2024"
 description = "A high-performance, archetype-based ECS engine written in Rust."
 readme = "README.md"
@@ -51,3 +51,41 @@ required-features = ["reactivity"]
 default = []
 derive = ["dep:venix_macros"]
 reactivity = []
+
+
+[[example]]
+name = "hello_world"
+path = "examples/01_hello_world.rs"
+
+[[example]]
+name = "commands"
+path = "examples/02_commands.rs"
+
+[[example]]
+name = "parallel_commands"
+path = "examples/03_parallel_commands.rs"
+
+[[example]]
+name = "events"
+path = "examples/04_events.rs"
+
+[[example]]
+name = "parallel_events"
+path = "examples/05_parallel_events.rs"
+
+[[example]]
+name = "query"
+path = "examples/06_query.rs"
+
+[[example]]
+name = "query_parallel"
+path = "examples/07_query_parallel.rs"
+
+[[example]]
+name = "query_lookups"
+path = "examples/08_query_lookups.rs"
+
+[[example]]
+name = "query_reactivity"
+path = "examples/09_query_reactivity.rs"
+required-features = ["reactivity"]
