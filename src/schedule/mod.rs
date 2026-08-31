@@ -1,5 +1,5 @@
 use crate::{
-    app::{app::App, plugin::Plugin},
+    app::{App, plugin::Plugin},
     schedule::schedules_list::{ApplyCommands, CleanupHandles, First, Last, Update},
 };
 

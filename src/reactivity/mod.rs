@@ -8,10 +8,10 @@ use std::{
 use crate::extensions::ComponentColumn;
 
 #[cfg(feature = "reactivity")]
-pub mod changed;
+mod changed;
 
 #[cfg(feature = "reactivity")]
-pub mod added;
+mod added;
 
 #[cfg(feature = "reactivity")]
 #[derive(Debug)]
@@ -25,3 +25,12 @@ pub(crate) struct TrackedComponentMeta {
 
 #[cfg(feature = "reactivity")]
 pub(crate) static TRACKED_COMPONENTS: RwLock<Vec<TrackedComponentMeta>> = RwLock::new(Vec::new());
+
+#[cfg(feature = "reactivity")]
+pub use changed::{Changed, ChangedTracker};
+
+#[cfg(feature = "reactivity")]
+pub(crate) use changed::{ChangedMarker, Mut};
+
+#[cfg(feature = "reactivity")]
+pub use added::{Added, AddedTracker};

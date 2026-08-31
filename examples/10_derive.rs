@@ -1,18 +1,20 @@
-use rusty_fork::rusty_fork_test;
 use venix::prelude::*;
 
+#[derive(Debug)]
 struct Position {
     x: f32,
     y: f32,
 }
 
+#[derive(Debug)]
 struct Velocity {
     x: f32,
     y: f32,
 }
 
-struct TagA;
-struct TagB;
+struct Player;
+
+struct Enemy;
 
 struct ScoreTracker {
     points: i32,
@@ -28,39 +30,42 @@ fn test_runner_once(app: &mut App) {
 struct PlayerComponentBundle {
     pos: Position,
     vel: Velocity,
-    tag: TagA,
+    tag: Player,
 }
 
 #[derive(QueryData)]
+#[venix(query_data(derive(Debug)))]
 struct PhysicsQuery {
     pos: &'static Position,
     vel: &'static mut Velocity,
 }
 
 #[derive(QueryFilter)]
-struct TagAFilter {
-    has_a: With<TagA>,
-    no_b: Without<TagB>,
+struct PlayerFilter {
+    has_player: With<Player>,
+    not_enemy: Without<Enemy>,
 }
 
 #[derive(SystemParam)]
 struct CompositeSystemParam<'a> {
-    query: Query<'a, PhysicsQuery, TagAFilter>,
+    query: Query<'a, PhysicsQuery, PlayerFilter>,
     tracker: ResMut<'a, ScoreTracker>,
+    #[venix(system_param(ignore))]
+    // Initialized with Default::default() every frame, it does not persist accross frames
+    counter: usize,
 }
 
 fn setup_macro_entities(mut commands: Commands) {
     commands.spawn(PlayerComponentBundle {
         pos: Position { x: 50.0, y: 50.0 },
         vel: Velocity { x: 2.0, y: 2.0 },
-        tag: TagA,
+        tag: Player,
     });
 
     commands.spawn((
         Position { x: 999.0, y: 999.0 },
         Velocity { x: 0.0, y: 0.0 },
-        TagA,
-        TagB,
+        Enemy,
     ));
 }
 
@@ -72,6 +77,7 @@ fn verify_and_mutate_macros(mut tools: CompositeSystemParam) {
         matched_entities += view.len();
         #[allow(unused_mut)]
         for mut entity in view.iter_mut() {
+            println!("entity: {:?}", entity);
             entity.vel.x += 10.0;
             entity.vel.y += 10.0;
             assert_eq!(entity.pos.x, 50.0);
@@ -80,19 +86,19 @@ fn verify_and_mutate_macros(mut tools: CompositeSystemParam) {
             assert_eq!(entity.vel.y, 12.0);
         }
     }
+    tools.counter += 1;
     assert_eq!(matched_entities, 1);
 }
 
-rusty_fork_test! {
-    #[test]
-    fn test_macro_derives_lifecycle() {
-        let mut app = App::new();
-        app.add_plugins(DefaultSchedulesPlugin)
-            .insert_resource(ScoreTracker { points: 0 })
-            .add_systems(Startup::id(), setup_macro_entities)
-            .add_systems(Update::id(), verify_and_mutate_macros);
+fn main() {
+    let mut app = App::new();
+    app.add_plugins(DefaultSchedulesPlugin)
+        .insert_resource(ScoreTracker { points: 0 })
+        .add_systems(Startup::id(), setup_macro_entities)
+        .add_systems(Update::id(), verify_and_mutate_macros);
 
-        app.set_runner(test_runner_once);
-        app.run();
-    }
+    app.set_runner(test_runner_once);
+    app.run();
+    let tracker = app.get_resource::<ScoreTracker>();
+    assert_eq!(tracker.points, 500);
 }

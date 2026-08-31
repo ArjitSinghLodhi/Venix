@@ -1,11 +1,17 @@
-use venix::prelude::*;
 use std::thread::sleep;
 use std::time::Duration;
+use venix::prelude::*;
 
-#[derive(Debug)] struct Player;
-#[derive(Debug)] struct Score(u32);
-#[derive(Debug)] struct Buff { name: &'static str }
-#[derive(Debug)] struct StatusEffect;
+#[derive(Debug)]
+struct Player;
+#[derive(Debug)]
+struct Score(u32);
+#[derive(Debug)]
+struct Buff {
+    name: &'static str,
+}
+#[derive(Debug)]
+struct StatusEffect;
 
 struct GameLoopCounter {
     frame: u32,
@@ -38,10 +44,14 @@ fn simulate_gameplay_mutations(
     if counter.frame == 2 {
         for mut view in score_query.iter_mut() {
             for (entity, mut score) in view.iter_mut() {
-                println!("🎯 [Mutation - Frame 2] Direct Mut Write modifying Score component value.");
+                println!(
+                    "🎯 [Mutation - Frame 2] Direct Mut Write modifying Score component value."
+                );
                 score.0 = 100;
 
-                println!("⚡ [Mutation - Frame 2] commands.insert_components() queued for 'StatusEffect'.");
+                println!(
+                    "⚡ [Mutation - Frame 2] commands.insert_components() queued for 'StatusEffect'."
+                );
                 commands.insert_components(entity.clone(), (StatusEffect,));
             }
         }
@@ -55,13 +65,18 @@ fn reactive_added_filter_system(
 ) {
     for view in added_buffs.iter() {
         for buff in view.iter() {
-            println!("📥 [Reactive Filter] Added<Buff> caught structural addition: '{}'", buff.name);
+            println!(
+                "📥 [Reactive Filter] Added<Buff> caught structural addition: '{}'",
+                buff.name
+            );
         }
     }
 
     for view in added_effects.iter() {
         for _ in view.iter() {
-            println!("📥 [Reactive Filter] Added<StatusEffect> caught secondary insert structural split!");
+            println!(
+                "📥 [Reactive Filter] Added<StatusEffect> caught secondary insert structural split!"
+            );
         }
     }
 }
@@ -72,13 +87,19 @@ fn reactive_changed_filter_system(
 ) {
     for view in changed_scores.iter() {
         for score in view.iter() {
-            println!("🔥 [Reactive Filter] Changed<Score> filter caught historical mutation! Value: {}", score.0);
+            println!(
+                "🔥 [Reactive Filter] Changed<Score> filter caught historical mutation! Value: {}",
+                score.0
+            );
         }
     }
 
     if counter.frame == 4 {
         let count = changed_scores.iter().map(|v| v.len()).sum::<usize>();
-        println!("🍃 [Lifecycle Decay] Frame 4 Changed<Score> item count: {} (State safely decayed to normal).", count);
+        println!(
+            "🍃 [Lifecycle Decay] Frame 4 Changed<Score> item count: {} (State safely decayed to normal).",
+            count
+        );
     }
 }
 
@@ -112,8 +133,8 @@ fn main() {
     let mut app = App::new();
 
     app.add_plugins(DefaultSchedulesPlugin)
-       .insert_resource(GameLoopCounter { frame: 0 })
-       .add_systems(Startup::id(), setup_game);
+        .insert_resource(GameLoopCounter { frame: 0 })
+        .add_systems(Startup::id(), setup_game);
 
     app.add_systems(
         Update::id(),

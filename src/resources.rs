@@ -2,7 +2,10 @@ use crate::{
     extensions::{FunctionData, ParamAccess, SystemParam},
     world::storage::World,
 };
-use std::marker::PhantomData;
+use std::{
+    fmt::{Debug, Display},
+    marker::PhantomData,
+};
 
 pub struct Res<'w, T: 'static> {
     val_ptr: *const T,
@@ -32,6 +35,18 @@ impl<'w, T: 'static> std::ops::Deref for Res<'w, T> {
 
 unsafe impl<'w, T: Send> Send for Res<'w, T> {}
 unsafe impl<'w, T: Sync> Sync for Res<'w, T> {}
+
+impl<'w, T: Debug> Debug for Res<'w, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        unsafe { write!(f, "{:?}", (*self.val_ptr)) }
+    }
+}
+
+impl<'w, T: Display> Display for Res<'w, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        unsafe { write!(f, "{}", (*self.val_ptr)) }
+    }
+}
 
 impl<'w, T: 'static> SystemParam for Res<'w, T> {
     fn get_access() -> ParamAccess {
@@ -81,6 +96,18 @@ impl<'w, T: 'static> std::ops::DerefMut for ResMut<'w, T> {
 
 unsafe impl<'w, T: Send> Send for ResMut<'w, T> {}
 unsafe impl<'w, T: Sync> Sync for ResMut<'w, T> {}
+
+impl<'w, T: Debug> Debug for ResMut<'w, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        unsafe { write!(f, "{:?}", (*self.val_ptr)) }
+    }
+}
+
+impl<'w, T: Display> Display for ResMut<'w, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        unsafe { write!(f, "{}", (*self.val_ptr)) }
+    }
+}
 
 impl<'w, T: 'static> SystemParam for ResMut<'w, T> {
     fn get_access() -> ParamAccess {

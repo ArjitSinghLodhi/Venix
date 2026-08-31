@@ -350,7 +350,7 @@ checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
 name = "venix"
-version = "2.2.1"
+version = "2.2.2"
 dependencies = [
  "fxhash",
  "indexmap",
@@ -363,9 +363,9 @@ dependencies = [
 
 [[package]]
 name = "venix_macros"
-version = "1.0.4"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bee618984d5776e932f5e48323d591d7ce0fad22ea9a61a128a1f1f08a52f0e5"
+checksum = "66324e5a63aa785493d87431ec1e80595056a60a305b0daa7a1b3b1ba727048d"
 dependencies = [
  "proc-macro2",
  "quote",

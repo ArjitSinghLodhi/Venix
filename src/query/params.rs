@@ -2,16 +2,16 @@ use fxhash::FxBuildHasher;
 use indexmap::IndexSet;
 use std::any::TypeId;
 
-#[cfg(feature = "reactivity")]
-use crate::{
-    detection::changed::{ChangedMarker, Mut},
-    world::storage::CurrentBufferIdx,
-};
 use crate::{
     entity::Entity,
     query::query::QueryData,
     system::validation::{AccessVec, FunctionData},
     world::archetypes::Archetype,
+};
+#[cfg(feature = "reactivity")]
+use crate::{
+    reactivity::{ChangedMarker, Mut},
+    world::storage::CurrentBufferIdx,
 };
 
 impl<T: 'static> QueryData for &T {

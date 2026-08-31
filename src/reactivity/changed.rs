@@ -1,6 +1,6 @@
-use crate::detection::{TRACKED_COMPONENTS, TrackedComponentMeta};
-use crate::query::filter::QueryFilter;
-use crate::query::query::QueryData;
+use crate::query::QueryData;
+use crate::query::QueryFilter;
+use crate::reactivity::{TRACKED_COMPONENTS, TrackedComponentMeta};
 use crate::system::validation::{AccessHashSet, AccessVec, FunctionData};
 use crate::world::archetypes::{Archetype, ComponentColumn};
 use crate::world::storage::CurrentBufferIdx;

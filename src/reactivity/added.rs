@@ -4,9 +4,9 @@ use fxhash::FxBuildHasher;
 use indexmap::IndexSet;
 
 use crate::{
-    detection::{TRACKED_COMPONENTS, TrackedComponentMeta},
     extensions::ComponentColumn,
-    query::{filter::QueryFilter, query::QueryData},
+    query::{QueryData, QueryFilter},
+    reactivity::{TRACKED_COMPONENTS, TrackedComponentMeta},
     world::storage::CurrentBufferIdx,
 };
 

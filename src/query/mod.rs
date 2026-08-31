@@ -1,4 +1,6 @@
-pub mod ergonomic_params;
 pub mod filter;
-pub mod params;
+mod params;
 pub mod query;
+
+pub use filter::*;
+pub use query::*;

@@ -10,7 +10,7 @@ use indexmap::{IndexMap, IndexSet};
 use crate::{commands::bundle::ComponentBundle, entity::Entity};
 
 #[cfg(feature = "reactivity")]
-use crate::detection::TRACKED_COMPONENTS;
+use crate::reactivity::TRACKED_COMPONENTS;
 
 pub(crate) trait AnyColumn: Any {
     unsafe fn swap_remove_erased(&mut self, idx: usize);

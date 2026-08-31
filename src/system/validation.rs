@@ -70,6 +70,29 @@ pub struct ParamAccess {
     pub res_writes: AccessVec<std::any::TypeId>,
 }
 
+impl ParamAccess {
+    pub fn extend(&mut self, param_access_other: &mut ParamAccess) {
+        self.reads
+            .vec
+            .extend(param_access_other.reads.vec.drain(..));
+        self.writes
+            .vec
+            .extend(param_access_other.writes.vec.drain(..));
+        self.with_filters
+            .vec
+            .extend(param_access_other.with_filters.vec.drain(..));
+        self.without_filters
+            .vec
+            .extend(param_access_other.without_filters.vec.drain(..));
+        self.res_reads
+            .vec
+            .extend(param_access_other.res_reads.vec.drain(..));
+        self.res_writes
+            .vec
+            .extend(param_access_other.res_writes.vec.drain(..));
+    }
+}
+
 pub trait SystemParam {
     fn get_access() -> ParamAccess;
     fn extract(world: &mut World, system_data: &mut FunctionData) -> Self;

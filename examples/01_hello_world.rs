@@ -15,7 +15,7 @@ struct FrameCounter {
 fn main() {
     App::new()
         .add_plugins(DefaultSchedulesPlugin)
-        .insert_resource(FrameCounter {current_frame: 0})
+        .insert_resource(FrameCounter { current_frame: 0 })
         .add_systems(Update::id(), hello_world_system)
         .set_runner(test_runner_once)
         .run();

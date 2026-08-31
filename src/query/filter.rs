@@ -1,7 +1,6 @@
 use std::any::TypeId;
 
 use crate::{
-    query::ergonomic_params::{AnyOf, Not, Or},
     system::validation::{AccessHashSet, AccessVec, FunctionData},
     world::archetypes::Archetype,
 };
@@ -34,6 +33,7 @@ pub trait QueryFilter {
     }
 }
 
+#[derive(Debug)]
 pub struct With<T>(std::marker::PhantomData<T>);
 impl<T: 'static> QueryFilter for With<T> {
     fn matches(types: &AccessHashSet<TypeId>) -> bool {
@@ -43,6 +43,8 @@ impl<T: 'static> QueryFilter for With<T> {
         withs.push(std::any::TypeId::of::<T>());
     }
 }
+
+#[derive(Debug)]
 pub struct Without<T>(std::marker::PhantomData<T>);
 impl<T: 'static> QueryFilter for Without<T> {
     fn matches(types: &AccessHashSet<TypeId>) -> bool {
@@ -52,6 +54,71 @@ impl<T: 'static> QueryFilter for Without<T> {
         withouts.push(std::any::TypeId::of::<T>());
     }
 }
+
+pub struct Or<A, B>(std::marker::PhantomData<(A, B)>);
+
+pub struct AnyOf<T>(std::marker::PhantomData<T>);
+
+pub struct Not<F>(std::marker::PhantomData<F>);
+
+impl<F: QueryFilter + StructuralQueryFilter> QueryFilter for Not<F> {
+    #[inline]
+    fn matches(types: &AccessHashSet<TypeId>) -> bool {
+        F::matches_negated(types)
+    }
+
+    #[inline]
+    fn collect_filter(withs: &mut AccessVec<TypeId>, withouts: &mut AccessVec<TypeId>) {
+        F::collect_filter(withouts, withs);
+    }
+}
+
+impl<A: QueryFilter + StructuralQueryFilter, B: QueryFilter + StructuralQueryFilter> QueryFilter
+    for Or<A, B>
+{
+    #[inline]
+    fn matches(types: &AccessHashSet<TypeId>) -> bool {
+        A::matches(types) || B::matches(types)
+    }
+
+    #[inline]
+    fn collect_filter(withs: &mut AccessVec<TypeId>, withouts: &mut AccessVec<TypeId>) {
+        A::collect_filter(withs, withouts);
+        B::collect_filter(withs, withouts);
+    }
+}
+
+macro_rules! impl_any_of_tuple {
+    ($($name:ident),*) => {
+        impl<$($name: QueryFilter + StructuralQueryFilter),*> QueryFilter for AnyOf<($($name,)*)> {
+            #[inline]
+            fn matches(types: &AccessHashSet<TypeId>) -> bool {
+                $($name::matches(types))||*
+            }
+            #[inline]
+            fn collect_filter(withs: &mut AccessVec<TypeId>, withouts: &mut AccessVec<TypeId>) {
+                $(
+                    $name::collect_filter(withs, withouts);
+                )*
+            }
+        }
+    };
+}
+
+impl_any_of_tuple!(A);
+impl_any_of_tuple!(A, B);
+impl_any_of_tuple!(A, B, C);
+impl_any_of_tuple!(A, B, C, D);
+impl_any_of_tuple!(A, B, C, D, E);
+impl_any_of_tuple!(A, B, C, D, E, F);
+impl_any_of_tuple!(A, B, C, D, E, F, G);
+impl_any_of_tuple!(A, B, C, D, E, F, G, H);
+impl_any_of_tuple!(A, B, C, D, E, F, G, H, I);
+impl_any_of_tuple!(A, B, C, D, E, F, G, H, I, J);
+impl_any_of_tuple!(A, B, C, D, E, F, G, H, I, J, K);
+impl_any_of_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
+
+#[derive(Debug)]
 pub struct EmptyQueryFilter;
 impl QueryFilter for EmptyQueryFilter {
     fn matches(_: &AccessHashSet<TypeId>) -> bool {
@@ -60,7 +127,7 @@ impl QueryFilter for EmptyQueryFilter {
     fn collect_filter(_withs: &mut AccessVec<TypeId>, _withouts: &mut AccessVec<TypeId>) {}
 }
 
-macro_rules! impl_QueryFilter_tuple {
+macro_rules! impl_query_filter_tuple {
     ($($name:ident),*) => {
         impl<$($name: QueryFilter),*> QueryFilter for ($($name,)*) {
             #[inline]
@@ -90,16 +157,16 @@ macro_rules! impl_QueryFilter_tuple {
     };
 }
 
-impl_QueryFilter_tuple!(A);
-impl_QueryFilter_tuple!(A, B);
-impl_QueryFilter_tuple!(A, B, C);
-impl_QueryFilter_tuple!(A, B, C, D);
-impl_QueryFilter_tuple!(A, B, C, D, E);
-impl_QueryFilter_tuple!(A, B, C, D, E, F);
-impl_QueryFilter_tuple!(A, B, C, D, E, F, G);
-impl_QueryFilter_tuple!(A, B, C, D, E, F, G, H);
-impl_QueryFilter_tuple!(A, B, C, D, E, F, G, H, I);
-impl_QueryFilter_tuple!(A, B, C, D, E, F, G, H, I, J);
-impl_QueryFilter_tuple!(A, B, C, D, E, F, G, H, I, J, K);
-impl_QueryFilter_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
-impl_QueryFilter_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M);
+impl_query_filter_tuple!(A);
+impl_query_filter_tuple!(A, B);
+impl_query_filter_tuple!(A, B, C);
+impl_query_filter_tuple!(A, B, C, D);
+impl_query_filter_tuple!(A, B, C, D, E);
+impl_query_filter_tuple!(A, B, C, D, E, F);
+impl_query_filter_tuple!(A, B, C, D, E, F, G);
+impl_query_filter_tuple!(A, B, C, D, E, F, G, H);
+impl_query_filter_tuple!(A, B, C, D, E, F, G, H, I);
+impl_query_filter_tuple!(A, B, C, D, E, F, G, H, I, J);
+impl_query_filter_tuple!(A, B, C, D, E, F, G, H, I, J, K);
+impl_query_filter_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
+impl_query_filter_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M);

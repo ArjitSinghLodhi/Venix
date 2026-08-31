@@ -4,7 +4,10 @@ use venix::prelude::*;
 struct ThreadMarker(u32);
 
 #[allow(dead_code)]
-struct Position { x: f32, y: f32 }
+struct Position {
+    x: f32,
+    y: f32,
+}
 
 fn main() {
     println!("=== Simultaneous thread parallel commands and system injected ===\n");
@@ -24,7 +27,13 @@ fn main() {
             par_commands.scope(|mut cmd| {
                 println!("[Thread 1] Queueing 500 entities...");
                 for i in 0..500 {
-                    cmd.spawn((Position { x: i as f32, y: 1.0 }, ThreadMarker(1)));
+                    cmd.spawn((
+                        Position {
+                            x: i as f32,
+                            y: 1.0,
+                        },
+                        ThreadMarker(1),
+                    ));
                 }
             });
         });
@@ -34,7 +43,13 @@ fn main() {
             par_commands.scope(|mut cmd| {
                 println!("[Thread 2] Queueing 500 entities...");
                 for i in 0..500 {
-                    cmd.spawn((Position { x: i as f32, y: 2.0 }, ThreadMarker(2)));
+                    cmd.spawn((
+                        Position {
+                            x: i as f32,
+                            y: 2.0,
+                        },
+                        ThreadMarker(2),
+                    ));
                 }
             });
         });
@@ -51,7 +66,13 @@ fn system_parallel_spawn_system(par_commands: ParallelCommands) {
             par_commands.scope(|mut cmd| {
                 println!("[System-Injected Thread 3] Queueing 500 entities...");
                 for i in 0..500 {
-                    cmd.spawn((Position { x: i as f32, y: 3.0 }, ThreadMarker(3)));
+                    cmd.spawn((
+                        Position {
+                            x: i as f32,
+                            y: 3.0,
+                        },
+                        ThreadMarker(3),
+                    ));
                 }
             });
         });
@@ -79,8 +100,11 @@ fn verify_parallel_spawns_system(query: Query<(&Position, &ThreadMarker)>) {
         println!("\n>> Venix System Analysis:");
         println!("   -> Verified Thread 1 entities stored: {}", t1_count);
         println!("   -> Verified Thread 2 entities stored: {}", t2_count);
-        println!("   -> Verified System-Injected Thread 3 entities stored: {}", t3_count);
-        
+        println!(
+            "   -> Verified System-Injected Thread 3 entities stored: {}",
+            t3_count
+        );
+
         assert_eq!(t1_count, 500);
         assert_eq!(t2_count, 500);
         assert_eq!(t3_count, 500);
@@ -92,6 +116,6 @@ fn run_parallel_test_loop(app: &mut App) {
     app.build();
     app.run_startup();
 
-    app.update(); 
-    app.update(); 
+    app.update();
+    app.update();
 }

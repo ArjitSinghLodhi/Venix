@@ -161,8 +161,14 @@ fn parallel_verification_system(
 
         println!("\n>> Venix Parallel Event Analysis (Frame 2):");
         println!("   -> Total events collected across threads: {}", count);
-        println!("   -> Parallel Reader A verified historic count: {}", nest_read_a_count);
-        println!("   -> Parallel Reader B verified historic count: {}", nest_read_b_count);
+        println!(
+            "   -> Parallel Reader A verified historic count: {}",
+            nest_read_a_count
+        );
+        println!(
+            "   -> Parallel Reader B verified historic count: {}",
+            nest_read_b_count
+        );
 
         assert_eq!(base_count, 1);
         assert_eq!(parallel_count, 20);
@@ -172,7 +178,10 @@ fn parallel_verification_system(
         println!("   -> Success: All 21 concurrent events aggregated and synchronized perfectly!");
     } else if counter.current_frame == 3 {
         println!("\n>> Venix Parallel Event Analysis (Frame 3):");
-        println!("   -> Checking parallel buffer decay. Reader count: {}", count);
+        println!(
+            "   -> Checking parallel buffer decay. Reader count: {}",
+            count
+        );
         assert_eq!(count, 0);
         println!("   -> Success: Parallel event buffers automatically decayed and cleared!");
     }
@@ -182,7 +191,7 @@ fn test_three_frames(app: &mut App) {
     app.build();
     app.run_startup();
 
-    app.update(); 
-    app.update(); 
-    app.update(); 
+    app.update();
+    app.update();
+    app.update();
 }

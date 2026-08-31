@@ -72,8 +72,12 @@ fn complex_coordinated_view_lookup_system(
             #[allow(unused_mut)]
             if let Some(mut health) = view.get_mut(&target.0) {
                 if health.0 == 500 {
-                    println!("\n[Complex Coordinated Lookup] Executing vector-staged View-level array fetch:");
-                    println!("   -> Pulling vector targets directly from active Archetype View matrix.");
+                    println!(
+                        "\n[Complex Coordinated Lookup] Executing vector-staged View-level array fetch:"
+                    );
+                    println!(
+                        "   -> Pulling vector targets directly from active Archetype View matrix."
+                    );
                     println!("   -> Initial Enemy health: {}", health.0);
                     health.0 -= 100;
                     println!("   -> Enemy health cleanly modified to: {}", health.0);
@@ -95,8 +99,12 @@ fn zero_allocation_nested_lookup_system(
                 if let Some(mut health) = health_view.get_mut(entity) {
                     #[allow(unused_mut)]
                     if health.0 == 1000 {
-                        println!("\n[Zero-Allocation Nested Lookup] Executing zero-heap nested array match:");
-                        println!("   -> Completely bypassed staging vectors; streaming directly across views.");
+                        println!(
+                            "\n[Zero-Allocation Nested Lookup] Executing zero-heap nested array match:"
+                        );
+                        println!(
+                            "   -> Completely bypassed staging vectors; streaming directly across views."
+                        );
                         println!("   -> Initial Boss health: {}", health.0);
                         health.0 -= 200;
                         println!("   -> Boss health cleanly modified to: {}", health.0);
@@ -111,7 +119,7 @@ fn zero_allocation_nested_lookup_system(
 fn run_lookup_test_loop(app: &mut App) {
     app.build();
     app.run_startup();
-    
+
     app.update();
     app.update();
 }

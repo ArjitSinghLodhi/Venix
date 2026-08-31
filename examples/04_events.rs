@@ -50,10 +50,7 @@ fn event_execution_system(
     }
 }
 
-fn event_verification_system(
-    counter: Res<FrameCounter>,
-    reader: EventReader<ThreatEvent>,
-) {
+fn event_verification_system(counter: Res<FrameCounter>, reader: EventReader<ThreatEvent>) {
     let count = reader.read().count();
 
     if counter.current_frame == 2 {
@@ -67,7 +64,7 @@ fn event_verification_system(
         }
         assert!(values.contains(&100.0));
         assert!(values.contains(&50.0));
-        
+
         println!("   -> Success: All events synchronized cleanly on Frame 2!");
     } else if counter.current_frame == 3 {
         println!("\n>> Venix Event Analysis (Frame 3):");

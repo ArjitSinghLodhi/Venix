@@ -13,7 +13,7 @@ use crate::{
 };
 
 #[cfg(feature = "reactivity")]
-use crate::detection::TRACKED_COMPONENTS;
+use crate::reactivity::TRACKED_COMPONENTS;
 
 pub(crate) struct CurrentBufferIdx;
 static CURRENT_BUFFER_IDX: AtomicU8 = AtomicU8::new(1);
@@ -180,15 +180,11 @@ impl World {
         ParallelCommands::extract(self, &mut FunctionData::new())
     }
 
-    pub fn get_par_event_writer<T: 'static + Send + Sync>(
-        &mut self,
-    ) -> ParallelEventWriter<T> {
+    pub fn get_par_event_writer<T: 'static + Send + Sync>(&mut self) -> ParallelEventWriter<T> {
         ParallelEventWriter::extract(self, &mut FunctionData::new())
     }
 
-    pub fn get_par_event_reader<T: 'static + Send + Sync>(
-        &mut self,
-    ) -> ParallelEventReader<T> {
+    pub fn get_par_event_reader<T: 'static + Send + Sync>(&mut self) -> ParallelEventReader<T> {
         ParallelEventReader::extract(self, &mut FunctionData::new())
     }
 }

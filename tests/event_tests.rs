@@ -201,7 +201,6 @@ fn parallel_verification_system(
         assert_eq!(parallel_count, 10);
 
         thread::scope(|s| {
-
             s.spawn(|| {
                 par_reader_a.scope(|reader_a| {
                     nest_read_a_count = reader_a.read().count();

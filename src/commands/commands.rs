@@ -5,7 +5,13 @@ use papaya::{HashSet, HashSetRef, LocalGuard};
 
 use crate::{
     commands::{
-        DespawnCommand, bundle::ComponentBundle, command_queue::{CommandQueue, WorldCommand}, command_types::{AddComponentsCommand, BatchSpawnCommand, InsertComponentsCommand, RemoveComponentsCommand, SpawnCommand}
+        DespawnCommand,
+        bundle::ComponentBundle,
+        command_queue::{CommandQueue, WorldCommand},
+        command_types::{
+            AddComponentsCommand, BatchSpawnCommand, InsertComponentsCommand,
+            RemoveComponentsCommand, SpawnCommand,
+        },
     },
     entity::Entity,
     system::validation::{FunctionData, ParamAccess, SystemParam},
@@ -39,8 +45,8 @@ impl Commands<'_> {
     pub fn spawn<C: ComponentBundle + Send>(&mut self, components: C) {
         self.push(SpawnCommand { components });
     }
-    
-    pub fn spawn_batch<C, I>(&mut self, components_iter: I) 
+
+    pub fn spawn_batch<C, I>(&mut self, components_iter: I)
     where
         C: ComponentBundle + Send,
         I: IntoIterator<Item = C>,

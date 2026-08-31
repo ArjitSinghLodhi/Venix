@@ -1,10 +1,16 @@
-use std::any::TypeId;
 use fxhash::{FxBuildHasher, FxHashMap};
 use indexmap::{IndexMap, IndexSet};
+use std::any::TypeId;
 
-use crate::{commands::{bundle::ComponentBundle, command_queue::WorldCommand}, entity::Entity, extensions::{Archetype, ComponentColumn, World}, registry::{REGISTRY, RegistryCell}, world::archetypes::{AnyColumn, ArchetypeId}};
 #[cfg(feature = "reactivity")]
-use crate::detection::TRACKED_COMPONENTS;
+use crate::reactivity::TRACKED_COMPONENTS;
+use crate::{
+    commands::{bundle::ComponentBundle, command_queue::WorldCommand},
+    entity::Entity,
+    extensions::{Archetype, ComponentColumn, World},
+    registry::{REGISTRY, RegistryCell},
+    world::archetypes::{AnyColumn, ArchetypeId},
+};
 
 pub(crate) struct SpawnCommand<T: ComponentBundle> {
     pub(crate) components: T,
@@ -40,8 +46,12 @@ pub(crate) struct BatchSpawnCommand<T: ComponentBundle> {
 impl<T: ComponentBundle + Send> WorldCommand for BatchSpawnCommand<T> {
     fn apply(self, world: &mut World) {
         let world_ptr = world as *mut World;
-        let arch_id = unsafe { (*world_ptr).archetypes_manager.get_or_create_from_generic::<T>() };
-        
+        let arch_id = unsafe {
+            (*world_ptr)
+                .archetypes_manager
+                .get_or_create_from_generic::<T>()
+        };
+
         let arch = unsafe {
             (*world_ptr)
                 .archetypes_manager
@@ -59,10 +69,9 @@ impl<T: ComponentBundle + Send> WorldCommand for BatchSpawnCommand<T> {
 
         for components in self.components_iter {
             let next_idx = arch.entities.len() as u32;
-            let assigned_registry_idx = unsafe { 
-                alloc_registry_cell(arch_id, next_idx, &mut *world_ptr) 
-            };
-            
+            let assigned_registry_idx =
+                unsafe { alloc_registry_cell(arch_id, next_idx, &mut *world_ptr) };
+
             arch.entities.push(Entity::new(assigned_registry_idx));
             components.push_to_archetype(arch);
 
@@ -510,8 +519,8 @@ fn initialize_spawn_markers(columns: &mut IndexMap<TypeId, ComponentColumn, FxBu
 #[cfg(feature = "reactivity")]
 #[inline]
 fn initialize_batch_spawn_markers(
-    columns: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>, 
-    batch_size: usize
+    columns: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
+    batch_size: usize,
 ) {
     let tracked = TRACKED_COMPONENTS.read().unwrap();
     for meta in tracked.iter() {
