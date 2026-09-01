@@ -77,7 +77,7 @@ impl Commands<'_> {
         self.push(InsertComponentsCommand { entity, components });
     }
 
-    pub fn despawn_iter<F>(&self) -> impl Iterator<Item = &DespawnCommand> {
+    pub fn despawn_iter(&self) -> impl Iterator<Item = &DespawnCommand> {
         self.despawns.iter()
     }
 
