@@ -72,24 +72,20 @@ pub struct ParamAccess {
 
 impl ParamAccess {
     pub fn extend(&mut self, param_access_other: &mut ParamAccess) {
-        self.reads
-            .vec
-            .extend(param_access_other.reads.vec.drain(..));
-        self.writes
-            .vec
-            .extend(param_access_other.writes.vec.drain(..));
+        self.reads.vec.append(&mut param_access_other.reads.vec);
+        self.writes.vec.append(&mut param_access_other.writes.vec);
         self.with_filters
             .vec
-            .extend(param_access_other.with_filters.vec.drain(..));
+            .append(&mut param_access_other.with_filters.vec);
         self.without_filters
             .vec
-            .extend(param_access_other.without_filters.vec.drain(..));
+            .append(&mut param_access_other.without_filters.vec);
         self.res_reads
             .vec
-            .extend(param_access_other.res_reads.vec.drain(..));
+            .append(&mut param_access_other.res_reads.vec);
         self.res_writes
             .vec
-            .extend(param_access_other.res_writes.vec.drain(..));
+            .append(&mut param_access_other.res_writes.vec);
     }
 }
 
@@ -103,80 +99,54 @@ pub trait System: SystemData {
 }
 
 pub trait SystemData {
-    fn get_raw_data(&self, id: TypeId) -> Option<&Box<dyn Any>>;
-    fn get_raw_data_mut(&mut self, id: TypeId) -> Option<&mut Box<dyn Any>>;
-    fn insert_raw_data(&mut self, id: TypeId, value: Box<dyn Any>);
+    fn get_raw(&self, id: TypeId) -> Option<&Box<dyn Any>>;
+    fn get_raw_mut(&mut self, id: TypeId) -> Option<&mut Box<dyn Any>>;
+    fn insert_raw(&mut self, id: TypeId, value: Box<dyn Any>);
 }
 
 pub trait SystemExt {
     fn get_data<T: 'static>(&self) -> Option<&T>;
     fn get_data_mut<T: 'static>(&mut self) -> Option<&mut T>;
     fn insert<T: 'static>(&mut self, value: T);
-    fn get_or_init<T: 'static>(&mut self, init: fn() -> T) -> &T;
-    fn get_or_init_mut<T: 'static>(&mut self, init: fn() -> T) -> &mut T;
+    fn get_or_init<T: 'static, F: FnOnce() -> T>(&mut self, init: F) -> &T;
+    fn get_or_init_mut<T: 'static, F: FnOnce() -> T>(&mut self, init: F) -> &mut T;
 }
 
 impl<S: SystemData + ?Sized> SystemExt for S {
     fn get_data<T: 'static>(&self) -> Option<&T> {
-        self.get_raw_data(TypeId::of::<T>())
+        self.get_raw(TypeId::of::<T>())
             .and_then(|any| any.downcast_ref::<T>())
     }
 
     fn get_data_mut<T: 'static>(&mut self) -> Option<&mut T> {
-        self.get_raw_data_mut(TypeId::of::<T>())
+        self.get_raw_mut(TypeId::of::<T>())
             .and_then(|any| any.downcast_mut::<T>())
     }
 
     fn insert<T: 'static>(&mut self, value: T) {
-        self.insert_raw_data(TypeId::of::<T>(), Box::new(value));
+        self.insert_raw(TypeId::of::<T>(), Box::new(value));
     }
 
-    fn get_or_init<T: 'static>(&mut self, init: fn() -> T) -> &T {
+    fn get_or_init<T, F>(&mut self, init: F) -> &T
+    where
+        T: 'static,
+        F: FnOnce() -> T,
+    {
         let id = TypeId::of::<T>();
-        if self.get_raw_data(id).is_none() {
-            self.insert_raw_data(id, Box::new(init()));
+        if self.get_raw(id).is_none() {
+            self.insert_raw(id, Box::new(init()));
         }
         self.get_data::<T>().unwrap()
     }
 
-    fn get_or_init_mut<T: 'static>(&mut self, init: fn() -> T) -> &mut T {
+    fn get_or_init_mut<T, F>(&mut self, init: F) -> &mut T
+    where
+        T: 'static,
+        F: FnOnce() -> T,
+    {
         let id = TypeId::of::<T>();
-        if self.get_raw_data(id).is_none() {
-            self.insert_raw_data(id, Box::new(init()));
-        }
-        self.get_data_mut::<T>().unwrap()
-    }
-}
-
-impl SystemExt for Box<dyn System> {
-    fn get_data<T: 'static>(&self) -> Option<&T> {
-        (**self)
-            .get_raw_data(TypeId::of::<T>())
-            .and_then(|any| any.downcast_ref::<T>())
-    }
-
-    fn get_data_mut<T: 'static>(&mut self) -> Option<&mut T> {
-        (**self)
-            .get_raw_data_mut(TypeId::of::<T>())
-            .and_then(|any| any.downcast_mut::<T>())
-    }
-
-    fn insert<T: 'static>(&mut self, value: T) {
-        (**self).insert_raw_data(TypeId::of::<T>(), Box::new(value));
-    }
-
-    fn get_or_init<T: 'static>(&mut self, init: fn() -> T) -> &T {
-        let id = TypeId::of::<T>();
-        if (**self).get_raw_data(id).is_none() {
-            (**self).insert_raw_data(id, Box::new(init()));
-        }
-        self.get_data::<T>().unwrap()
-    }
-
-    fn get_or_init_mut<T: 'static>(&mut self, init: fn() -> T) -> &mut T {
-        let id = TypeId::of::<T>();
-        if (**self).get_raw_data(id).is_none() {
-            (**self).insert_raw_data(id, Box::new(init()));
+        if self.get_raw(id).is_none() {
+            self.insert_raw(id, Box::new(init()));
         }
         self.get_data_mut::<T>().unwrap()
     }
@@ -250,15 +220,15 @@ impl<Marker, F> FunctionSystem<Marker, F> {
 }
 
 impl<Marker, F> SystemData for FunctionSystem<Marker, F> {
-    fn get_raw_data(&self, id: TypeId) -> Option<&Box<dyn Any>> {
+    fn get_raw(&self, id: TypeId) -> Option<&Box<dyn Any>> {
         self.data.get_raw_data(&id)
     }
 
-    fn get_raw_data_mut(&mut self, id: TypeId) -> Option<&mut Box<dyn Any>> {
+    fn get_raw_mut(&mut self, id: TypeId) -> Option<&mut Box<dyn Any>> {
         self.data.get_raw_data_mut(&id)
     }
 
-    fn insert_raw_data(&mut self, id: TypeId, value: Box<dyn Any>) {
+    fn insert_raw(&mut self, id: TypeId, value: Box<dyn Any>) {
         self.data.insert_raw_data(id, value);
     }
 }
@@ -301,31 +271,5 @@ where
 {
     fn add_to_schedule(self, schedule: &mut Vec<Box<dyn System>>) {
         schedule.push(Box::new(self.into_system()));
-    }
-}
-
-pub struct SystemId {
-    pub(crate) id: u32,
-}
-
-impl SystemId {
-    pub(crate) fn new(id: u32) -> Self {
-        Self { id }
-    }
-    pub fn get_id(&self) -> u32 {
-        self.id
-    }
-}
-
-impl SystemParam for SystemId {
-    fn get_access() -> ParamAccess {
-        ParamAccess::default()
-    }
-
-    fn extract(_world: &mut World, system_data: &mut FunctionData) -> Self {
-        let system_id = system_data.get_data::<SystemId>().unwrap();
-        Self {
-            id: system_id.get_id(),
-        }
     }
 }

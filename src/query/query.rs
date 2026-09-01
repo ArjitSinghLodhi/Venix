@@ -24,12 +24,31 @@ pub trait QueryData {
     type Fetch: Copy;
 
     fn matches(types: &IndexSet<TypeId, FxBuildHasher>) -> bool;
+
+    /// # Safety
+    ///
+    /// Implementations must guarantee that the returned `Self::Fetch` value contains valid,
+    /// initialized metadata, pointers, or references that remain valid for the duration of
+    /// the borrow layout. It must not lead to out-of-bounds memory access or invalid type casting.
     unsafe fn init_fetch(archetype: &Archetype, systems_data: &mut FunctionData) -> Self::Fetch;
     fn collect_access(
         reads: &mut AccessVec<std::any::TypeId>,
         writes: &mut AccessVec<std::any::TypeId>,
     );
+
+    /// # Safety
+    ///
+    /// * `fetch` must be a valid state originally produced by `init_fetch` for the current archetype.
+    /// * `index` must be strictly within the bounds of the allocated entity array for this archetype.
+    /// * The caller must ensure that unique, mutable access to the underlying item at `index`
+    ///   is maintained globally (no aliasing reads or writes).
     unsafe fn fetch_mut<'w>(fetch: Self::Fetch, index: usize) -> Self::Item<'w>;
+
+    /// # Safety
+    ///
+    /// * `fetch` must be a valid state originally produced by `init_fetch`.
+    /// * `index` must be strictly within bounds.
+    /// * Shared access must be synchronized; no concurrent mutable borrows may exist for this item.
     unsafe fn fetch_read_only<'w>(fetch: Self::Fetch, index: usize) -> Self::ReadOnlyItem<'w>;
 }
 
@@ -154,6 +173,9 @@ impl<'a, Q: QueryData, T> QueryArchetypeView<'a, Q, T> {
             })
     }
 
+    /// Random access lookup via Entity handle.
+    ///
+    /// Note: it does not respect dynamic filters like `Changed<T>` or `Added<T>`
     pub fn get(&self, entity: &Entity) -> Option<Q::ReadOnlyItem<'a>> {
         unsafe {
             let cell = REGISTRY.get_ptr(entity.registry_index as usize);
@@ -167,6 +189,11 @@ impl<'a, Q: QueryData, T> QueryArchetypeView<'a, Q, T> {
         }
     }
 
+    /// Random access lookup via Entity handle.
+    ///
+    /// Note: it does not respect dynamic filters like `Changed<T>` or `Added<T>`
+    /// # Safety
+    /// The caller must ensure that the entity handle belongs to the archetype of this view
     pub unsafe fn get_unchecked(&self, entity: &Entity) -> Q::ReadOnlyItem<'a> {
         unsafe {
             let cell = REGISTRY.get_ptr(entity.registry_index as usize);
@@ -221,6 +248,9 @@ impl<'a, Q: QueryData> QueryArchetypeView<'a, Q, Mutable> {
             })
     }
 
+    /// Random access lookup via Entity handle.
+    ///
+    /// Note: it does not respect dynamic filters like `Changed<T>` or `Added<T>`
     pub fn get_mut(&mut self, entity: &Entity) -> Option<Q::Item<'a>> {
         unsafe {
             let cell = REGISTRY.get_ptr(entity.registry_index as usize);
@@ -234,6 +264,11 @@ impl<'a, Q: QueryData> QueryArchetypeView<'a, Q, Mutable> {
         }
     }
 
+    /// Random access lookup via Entity handle.
+    ///
+    /// Note: it does not respect dynamic filters like `Changed<T>` or `Added<T>`
+    /// # Safety
+    /// The caller must ensure that the entity handle belongs to the archetype of this view
     pub unsafe fn get_mut_unchecked(&self, entity: &Entity) -> Q::Item<'a> {
         unsafe {
             let cell = REGISTRY.get_ptr(entity.registry_index as usize);
@@ -297,8 +332,16 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
         }
     }
 
-    pub fn matching_archetype_len(&self) -> usize {
+    pub fn matching_archetype_count(&self) -> usize {
         self.matching_archetypes.iter().flatten().count()
+    }
+
+    pub fn total_entities(&self) -> usize {
+        self.matching_archetypes
+            .iter()
+            .flatten()
+            .map(|arch| unsafe { (*arch.0).entities.len() })
+            .sum()
     }
 
     pub fn iter<'a>(&'a self) -> impl Iterator<Item = QueryArchetypeView<'a, Q, ReadOnly>> {
@@ -374,6 +417,9 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
             })
     }
 
+    /// Random access lookup via Entity handle.
+    ///
+    /// Note: it does not respect dynamic filters like `Changed<T>` or `Added<T>`
     pub fn get(&self, entity: &Entity) -> Option<Q::ReadOnlyItem<'q>> {
         unsafe {
             let cell_ptr = REGISTRY.get_ptr(entity.registry_index as usize);
@@ -386,6 +432,9 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
         }
     }
 
+    /// Random access lookup via Entity handle.
+    ///
+    /// Note: it does not respect dynamic filters like `Changed<T>` or `Added<T>`
     pub fn get_mut(&mut self, entity: &Entity) -> Option<Q::Item<'q>> {
         unsafe {
             let cell_ptr = REGISTRY.get_ptr(entity.registry_index as usize);
@@ -398,6 +447,11 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
         }
     }
 
+    /// Random access lookup via Entity handle.
+    ///
+    /// Note: it does not respect dynamic filters like `Changed<T>` or `Added<T>`
+    /// # Safety
+    /// The caller must ensure that the entity handle belongs to a matching archetype of the query.
     pub unsafe fn get_unchecked(&self, entity: &Entity) -> Q::ReadOnlyItem<'q> {
         unsafe {
             let cell_ptr = REGISTRY.get_ptr(entity.registry_index as usize);
@@ -412,6 +466,11 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
         }
     }
 
+    /// Random access lookup via Entity handle.
+    ///
+    /// Note: it does not respect dynamic filters like `Changed<T>` or `Added<T>`
+    /// # Safety
+    /// The caller must ensure that the entity handle belongs to a matching archetype of the query.
     pub unsafe fn get_mut_unchecked(&mut self, entity: &Entity) -> Q::Item<'q> {
         unsafe {
             let cell_ptr = REGISTRY.get_ptr(entity.registry_index as usize);

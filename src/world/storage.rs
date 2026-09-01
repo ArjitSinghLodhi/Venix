@@ -4,12 +4,13 @@ use std::{
     sync::atomic::{AtomicU8, Ordering},
 };
 
+#[cfg(feature = "events")]
+use crate::events::{ParallelEventReader, ParallelEventWriter, TRACKED_EVENTS};
 use crate::{
-    commands::{CommandBuffer, ParallelCommands, bundle::ComponentBundle},
-    events::{ParallelEventReader, ParallelEventWriter, TRACKED_EVENTS},
+    commands::{CommandBuffer, ParallelCommands},
     extensions::{FunctionData, SystemParam},
     registry::REGISTRY,
-    world::archetypes::{ArchetypeId, ArchetypeManager},
+    world::archetypes::ArchetypeManager,
 };
 
 #[cfg(feature = "reactivity")]
@@ -54,14 +55,9 @@ impl World {
             free_indices_list: Vec::new(),
         }
     }
-    pub fn pre_allocate_archetype<T: ComponentBundle>(&mut self) {
-        self.get_or_create_archetype_from_generic::<T>();
-    }
 
-    pub(crate) fn get_or_create_archetype_from_generic<T: ComponentBundle>(
-        &mut self,
-    ) -> ArchetypeId {
-        self.archetypes_manager.get_or_create_from_generic::<T>()
+    pub fn has_resource<T: 'static>(&self) -> bool {
+        self.resources.contains_key(&TypeId::of::<T>())
     }
 
     pub fn insert_resource<T: 'static>(&mut self, resource: T) {
@@ -85,7 +81,7 @@ impl World {
         });
 
         unsafe {
-            let base_any = &mut *cell.get();
+            let base_any = &*cell.get();
             base_any
                 .downcast_ref::<T>()
                 .expect("Resource type mismatch!")
@@ -110,7 +106,7 @@ impl World {
         let cell = self.resources.get(&type_id)?;
 
         unsafe {
-            let base_any = &mut *cell.get();
+            let base_any = &*cell.get();
             let casted_ref = base_any.downcast_ref::<T>()?;
             Some(casted_ref)
         }
@@ -126,7 +122,7 @@ impl World {
 
     pub fn apply_commands(&mut self) {
         let queue_arc = self.commands.queue.clone();
-        let mut queue_gaurd = queue_arc.write().unwrap();
+        let mut queue_gaurd = queue_arc.write();
         queue_gaurd.apply(self);
         let despawns_arc = self.commands.despawns.clone();
         let despawns = despawns_arc.pin();
@@ -137,13 +133,13 @@ impl World {
             despawn_cmd.apply(self);
             false
         });
-        self.free_indices_list.sort_by(|a, b| b.cmp(a));
     }
 
     pub(crate) fn end_of_frame_sync(&mut self) {
         CurrentBufferIdx::advance();
         #[cfg(feature = "reactivity")]
         self.clear_trackers();
+        #[cfg(feature = "events")]
         self.clear_events();
     }
 
@@ -165,8 +161,9 @@ impl World {
         }
     }
 
+    #[cfg(feature = "events")]
     fn clear_events(&mut self) {
-        let tracked_events = TRACKED_EVENTS.read().unwrap();
+        let tracked_events = TRACKED_EVENTS.read();
         for meta in tracked_events.iter() {
             let unsafecell = self
                 .resources
@@ -180,10 +177,11 @@ impl World {
         ParallelCommands::extract(self, &mut FunctionData::new())
     }
 
+    #[cfg(feature = "events")]
     pub fn get_par_event_writer<T: 'static + Send + Sync>(&mut self) -> ParallelEventWriter<T> {
         ParallelEventWriter::extract(self, &mut FunctionData::new())
     }
-
+    #[cfg(feature = "events")]
     pub fn get_par_event_reader<T: 'static + Send + Sync>(&mut self) -> ParallelEventReader<T> {
         ParallelEventReader::extract(self, &mut FunctionData::new())
     }

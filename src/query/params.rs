@@ -103,7 +103,7 @@ impl<T: 'static> QueryData for &mut T {
         unsafe {
             Mut {
                 value: fetch.0.add(index),
-                marker: fetch.1.add(index),
+                marker: fetch.1.wrapping_add(index),
                 current_write_idx: fetch.2,
                 should_modify: fetch.3,
                 _marker: std::marker::PhantomData,

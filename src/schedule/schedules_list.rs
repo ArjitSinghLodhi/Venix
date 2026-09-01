@@ -32,11 +32,27 @@ impl ScheduleLabel for First {
     }
 }
 
+pub struct PreUpdate;
+
+impl ScheduleLabel for PreUpdate {
+    fn get_place(&self) -> SchedulePlace {
+        SchedulePlace::After(First::id())
+    }
+}
+
 pub struct Update;
 
 impl ScheduleLabel for Update {
     fn get_place(&self) -> SchedulePlace {
-        SchedulePlace::After(First::id())
+        SchedulePlace::After(PreUpdate::id())
+    }
+}
+
+pub struct PostUpdate;
+
+impl ScheduleLabel for PostUpdate {
+    fn get_place(&self) -> SchedulePlace {
+        SchedulePlace::After(Update::id())
     }
 }
 

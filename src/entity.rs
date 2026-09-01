@@ -1,3 +1,5 @@
+use std::sync::atomic::Ordering;
+
 use crate::registry::REGISTRY;
 
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -19,9 +21,7 @@ impl Clone for Entity {
     fn clone(&self) -> Self {
         unsafe {
             let cell_ptr = REGISTRY.get_ptr(self.registry_idx() as usize);
-            (*cell_ptr)
-                .handle_count
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            (*cell_ptr).handle_count.fetch_add(1, Ordering::Relaxed);
         }
         Entity {
             registry_index: self.registry_index,
@@ -33,9 +33,7 @@ impl Drop for Entity {
     fn drop(&mut self) {
         unsafe {
             let cell_ptr = REGISTRY.get_ptr(self.registry_idx() as usize);
-            (*cell_ptr)
-                .handle_count
-                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            (*cell_ptr).handle_count.fetch_sub(1, Ordering::Relaxed);
         }
     }
 }

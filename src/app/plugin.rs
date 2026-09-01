@@ -1,16 +1,16 @@
 use crate::app::app::App;
 
 pub trait Plugin: 'static {
-    fn build(&mut self, app: &mut App);
+    fn build(self, app: &mut App);
 }
 
 pub trait PluginsBuildAll {
-    fn build_all(&mut self, app: &mut App);
+    fn build_all(self: Box<Self>, app: &mut App);
     fn get_plugin_names(&self) -> Vec<&'static str>;
 }
 
 impl<T: Plugin> PluginsBuildAll for T {
-    fn build_all(&mut self, app: &mut App) {
+    fn build_all(self: Box<Self>, app: &mut App) {
         self.build(app);
     }
 
@@ -22,9 +22,9 @@ impl<T: Plugin> PluginsBuildAll for T {
 macro_rules! plugin_tuple {
     ($($T:ident -> $idx:tt),*) => {
         impl<$($T: Plugin),*> PluginsBuildAll for ($($T,)*) {
-            fn build_all(&mut self, app: &mut App) {
+            fn build_all(self: Box<Self>, app: &mut App) {
                 $(
-                    $T::build(&mut self.$idx, app);
+                    $T::build(self.$idx, app);
                 )*
             }
 

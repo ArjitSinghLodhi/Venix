@@ -1,4 +1,5 @@
 mod app;
-pub mod plugin;
+mod plugin;
 
 pub use app::App;
+pub use plugin::{Plugin, PluginsBuildAll};

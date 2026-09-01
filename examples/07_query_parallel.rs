@@ -15,7 +15,7 @@ struct Velocity {
 }
 
 fn main() {
-    println!("=== TESTING VENIX: PARALLEL ARCHETYPE QUERIES ===\n");
+    println!("=== Parallel query example ===\n");
 
     let mut app = App::new();
     app.add_plugins(DefaultSchedulesPlugin)
@@ -35,13 +35,13 @@ fn main() {
     app.set_runner(run_parallel_test_loop);
     app.run();
 
-    println!("\n=== PARALLEL QUERY VERIFICATION COMPLETED ===");
+    println!("\n=== Parallel query example completed ===");
 }
 
 fn spawn_parallel_batch_system(mut commands: Commands) {
     println!("Spawning dense data pools via fast batch allocation with predictable noise...");
 
-    let batch = (0..20000).map(|i| {
+    let batch = (0..20_000).map(|i| {
         let seed_x = (i as u64).wrapping_mul(48271).wrapping_add(12345);
         let seed_y = seed_x.wrapping_mul(48271).wrapping_add(67890);
         let seed_vx = seed_y.wrapping_mul(48271).wrapping_add(11111);
@@ -63,12 +63,9 @@ fn spawn_parallel_batch_system(mut commands: Commands) {
 
 fn parallel_read_system(query: Query<(&Position, &WorkerId)>) {
     query.par_iter().for_each(|view| {
-        let chunk_count = view.len();
-        if chunk_count > 0 {
-            println!(
-                "[par_iter] Thread scanning view chunk of size: {}",
-                chunk_count
-            );
+        let entity_count = view.len();
+        if entity_count > 0 {
+            println!("[par_iter] Thread scanning view of size: {}", entity_count);
         }
     });
 }

@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use fxhash::FxBuildHasher;
 use papaya::HashSet;
+use parking_lot::RwLock;
 
 use crate::commands::DespawnCommand;
 use crate::commands::command_queue::CommandQueue;
@@ -7,7 +10,6 @@ use crate::commands::commands::Commands;
 use crate::extensions::{ParamAccess, SystemParam};
 use crate::system::validation::FunctionData;
 use crate::world::storage::World;
-use std::sync::{Arc, RwLock};
 
 #[derive(Clone)]
 pub struct ParallelCommands {
@@ -37,7 +39,7 @@ impl ParallelCommands {
         F: for<'b> FnOnce(Commands<'b>) -> R,
     {
         let commands = Commands {
-            queue: self.queue.read().unwrap(),
+            queue: self.queue.read(),
             despawns: self.despawns.pin(),
         };
         f(commands)

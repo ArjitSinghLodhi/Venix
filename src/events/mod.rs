@@ -1,3 +1,5 @@
+#![cfg(feature = "events")]
+
 mod events;
 mod parallel_events;
 

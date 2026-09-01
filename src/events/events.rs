@@ -1,10 +1,11 @@
 use std::{
     any::{Any, TypeId},
     cell::UnsafeCell,
-    sync::{Arc, RwLock, RwLockReadGuard},
+    sync::Arc,
 };
 
 use orx_concurrent_bag::ConcurrentBag;
+use parking_lot::{RwLock, RwLockReadGuard};
 
 use crate::extensions::{FunctionData, ParamAccess, SystemParam, World};
 
@@ -17,7 +18,7 @@ pub(crate) struct TrackedEventsMeta {
 pub(crate) static TRACKED_EVENTS: RwLock<Vec<TrackedEventsMeta>> = RwLock::new(Vec::new());
 
 pub(crate) fn register_event<T: 'static + Send + Sync>() {
-    let mut tracked = TRACKED_EVENTS.write().unwrap();
+    let mut tracked = TRACKED_EVENTS.write();
     if tracked
         .iter()
         .find(|meta| meta.comp_id == TypeId::of::<T>())
@@ -31,28 +32,18 @@ pub(crate) fn register_event<T: 'static + Send + Sync>() {
                 let event_queue = cell
                     .downcast_mut::<EventBuffer<T>>()
                     .expect("Registered event queue was not found when clearing data");
-                event_queue.read_queue.write().unwrap().queue.clear();
+                event_queue.read_queue.write().queue.clear();
                 std::mem::swap(&mut event_queue.read_queue, &mut event_queue.writer_queue);
             },
         });
     }
 }
 
-struct Event<T: 'static + Send + Sync> {
-    event: T,
-}
-
-impl<T: 'static + Send + Sync> Event<T> {
-    pub(crate) fn new(event: T) -> Self {
-        Self { event }
-    }
-}
-
 pub(crate) struct EventQueue<T: 'static + Send + Sync> {
-    queue: ConcurrentBag<Event<T>>,
+    queue: ConcurrentBag<T>,
 }
 
-pub(crate) struct EventBuffer<T: 'static + Send + Sync> {
+pub struct EventBuffer<T: 'static + Send + Sync> {
     pub(crate) read_queue: Arc<RwLock<EventQueue<T>>>,
     pub(crate) writer_queue: Arc<RwLock<EventQueue<T>>>,
 }
@@ -81,7 +72,16 @@ pub struct EventWriter<'a, T: 'static + Send + Sync> {
 impl<'a, T: 'static + Send + Sync> EventWriter<'a, T> {
     #[inline]
     pub fn send(&mut self, event: T) {
-        self.write_buffer.queue.push(Event::new(event));
+        self.write_buffer.queue.push(event);
+    }
+
+    #[inline]
+    pub fn send_batch<I>(&mut self, event_iter: I)
+    where
+        I: IntoIterator<Item = T>,
+        I::IntoIter: Send + 'static + ExactSizeIterator,
+    {
+        self.write_buffer.queue.extend(event_iter);
     }
 }
 impl<'a, T: 'static + Send + Sync> SystemParam for EventWriter<'a, T> {
@@ -94,7 +94,7 @@ impl<'a, T: 'static + Send + Sync> SystemParam for EventWriter<'a, T> {
             let buffer_ptr = world.get_resource_mut::<EventBuffer<T>>() as *mut EventBuffer<T>;
             let buffer_ref: &'a EventBuffer<T> = &*buffer_ptr;
 
-            let queue = buffer_ref.writer_queue.read().unwrap();
+            let queue = buffer_ref.writer_queue.read();
 
             Self {
                 write_buffer: queue,
@@ -111,8 +111,8 @@ pub struct EventReader<'w, T: 'static + Send + Sync> {
 }
 
 impl<'w, T: 'static + Send + Sync> EventReader<'w, T> {
-    pub fn read(&self) -> impl Iterator<Item = &T> {
-        unsafe { self.read_buffer.queue.iter().map(|event| &event.event) }
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        unsafe { self.read_buffer.queue.iter() }
     }
 }
 
@@ -124,7 +124,7 @@ impl<'w, T: 'static + Send + Sync> SystemParam for EventReader<'w, T> {
     fn extract(world: &mut World, _system_data: &mut FunctionData) -> Self {
         let event_buffer_ref = world.get_resource::<EventBuffer<T>>() as *const EventBuffer<T>;
         let queue_ref = unsafe { &*event_buffer_ref };
-        let queue = queue_ref.read_queue.read().unwrap();
+        let queue = queue_ref.read_queue.read();
 
         Self { read_buffer: queue }
     }

@@ -4,6 +4,19 @@ A deterministic, high-concurrency Entity Component System (ECS) written in Rust,
 
 ---
 
+## 🔒 Production Readiness & API Blueprint
+
+Venix v3.x.x is the complete, stable baseline for the ecs. The core traits and architecture are locked down. You can build on this version without worrying about breaking changes or API churn.
+
+* **SemVer Compliance**  
+  The public API surface is stable. No unexpected signature rewrites in future updates.
+* **Vanilla Rust Data Types**  
+  Zero mandatory derive macros, procedural code generation, or structural marker traits. Your domain components stay clean, vanilla Rust structs.
+* **Zero Magic Type-System Hacks**  
+  For single component operations, a `(Component,)` is needed rather than a plain `Component` to avoid forcing derive traits on every struct. However, enabling the derive feature flag allows you to cleanly turn any struct into an unpackable component bundle.
+
+---
+
 ## 🚀 Performance & Invariant Guarantees
 
 * **🛡️ 100% Miri-Validated Sandbox**  
@@ -88,12 +101,16 @@ Unlock zero-overhead data abstractions. Code generation pipelines maintain user 
 * `#[derive(SystemParam)]` – Groups system parameters into unified struct.
 
 ### Core Ecosystem Modules
-* `venix::prelude` – Includes all normal every day usage imports.
+* `venix::prelude` – Includes all normal everyday usage imports.
 * `venix::extensions` – Includes lower level access to archetypes and data for anyone to build ontop of venix.
 
 ### Cargo Compilation Flags
+
+Venix by default compiles strictly as a data container (`default = []`). Scale the engine's capabilities by opting into modular compilation blocks in your `Cargo.toml`:
+
 * `derive` – Activates code-generation syntax macros (`ComponentBundle`, `QueryData`, etc.).
-* `reactivity` – Activates reactivity mechanics like `Added` and `Changed`.
+* `reactivity` – Activates double-buffered reactivity tracking (`Added`, `Changed`, `ChangedTracker`, etc.).
+* `events` – Activates high-concurrency event broadcasting pipelines (`EventWriter`, `EventReader`, `ParallelEventWriter`, etc.).
 
 ---
 

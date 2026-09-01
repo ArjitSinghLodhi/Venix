@@ -89,7 +89,15 @@ impl Archetype {
         }
     }
 
-    pub(crate) unsafe fn fetch_column_raw<T: 'static>(&self) -> *mut Vec<T> {
+    /// # Safety
+    ///
+    /// * **Aliasing**: The caller must guarantee that no other mutable or immutable references
+    ///   to this specific column's `Vec<T>` (or its contents) exist simultaneously.
+    /// * **Data Races**: This function returns a raw pointer. Accessing or mutating the underlying
+    ///   vector across threads without explicit synchronization causes a data race.
+    /// * **Invalidation**: Modifying the vector (e.g., pushing/popping) may trigger a reallocation,
+    ///   immediately invalidating any previously derived pointers or references to its elements.
+    pub unsafe fn fetch_column_raw<T: 'static>(&self) -> *mut Vec<T> {
         unsafe {
             let cols = &mut *self.columns.get();
             let col = cols
@@ -102,6 +110,14 @@ impl Archetype {
         }
     }
 
+    /// # Safety
+    ///
+    /// * **Aliasing**: The caller must guarantee that no other mutable or immutable references
+    ///   to this specific column's `Vec<T>` (or its contents) exist simultaneously.
+    /// * **Data Races**: This function returns a raw pointer. Accessing or mutating the underlying
+    ///   vector across threads without explicit synchronization causes a data race.
+    /// * **Invalidation**: Modifying the vector (e.g., pushing/popping) may trigger a reallocation,
+    ///   immediately invalidating any previously derived pointers or references to its elements.
     pub unsafe fn fetch_column_raw_opt<T: 'static>(&self) -> Option<*mut Vec<T>> {
         let cols = unsafe { &mut *self.columns.get() };
         let col = cols.get_mut(&TypeId::of::<T>())?;
@@ -133,7 +149,7 @@ impl ArchetypeManager {
         let mut combined_hash: u64 = 0;
         let hasher_builder = self.index.hasher();
         for type_id in types {
-            combined_hash ^= hasher_builder.hash_one(type_id);
+            combined_hash = combined_hash.wrapping_add(hasher_builder.hash_one(type_id));
         }
         combined_hash
     }
@@ -240,14 +256,12 @@ impl ArchetypeManager {
 
         #[cfg(feature = "reactivity")]
         if let Ok(tracked) = TRACKED_COMPONENTS.read() {
-            let marker_columns: Vec<_> = tracked
+            tracked
                 .iter()
                 .filter(|m| types_set.contains(&m.marker_id))
-                .map(|m| (m.marker_id, m.create_marker_column))
-                .collect();
-            for (marker_id, create_fn) in marker_columns {
-                columns.insert(marker_id, create_fn());
-            }
+                .for_each(|m| {
+                    columns.insert(m.marker_id, (m.create_marker_column)());
+                });
         }
 
         let new_arch = Archetype::new(new_id, types_set, columns, types_names_set);

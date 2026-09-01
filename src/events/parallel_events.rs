@@ -1,4 +1,6 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+
+use parking_lot::RwLock;
 
 use crate::{
     events::{EventBuffer, EventReader, EventWriter, events::EventQueue},
@@ -16,7 +18,7 @@ impl<T: 'static + Send + Sync> ParallelEventWriter<T> {
         F: for<'b> FnOnce(EventWriter<'b, T>) -> R,
     {
         let writer = EventWriter {
-            write_buffer: self.write_buffer.read().unwrap(),
+            write_buffer: self.write_buffer.read(),
         };
         f(writer)
     }
@@ -50,7 +52,7 @@ impl<T: 'static + Send + Sync> ParallelEventReader<T> {
         F: for<'b> FnOnce(EventReader<'b, T>) -> R,
     {
         let reader = EventReader {
-            read_buffer: self.read_buffer.read().unwrap(),
+            read_buffer: self.read_buffer.read(),
         };
         f(reader)
     }

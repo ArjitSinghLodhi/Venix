@@ -1,7 +1,8 @@
-use std::sync::{Arc, RwLock, RwLockReadGuard};
+use std::sync::Arc;
 
 use fxhash::FxBuildHasher;
 use papaya::{HashSet, HashSetRef, LocalGuard};
+use parking_lot::{RawRwLock, RwLock, lock_api::RwLockReadGuard};
 
 use crate::{
     commands::{
@@ -33,7 +34,7 @@ impl CommandBuffer {
 }
 
 pub struct Commands<'a> {
-    pub(crate) queue: RwLockReadGuard<'a, CommandQueue>,
+    pub(crate) queue: parking_lot::RwLockReadGuard<'a, CommandQueue>,
     pub(crate) despawns: HashSetRef<'a, DespawnCommand, FxBuildHasher, LocalGuard<'a>>,
 }
 
@@ -76,13 +77,8 @@ impl Commands<'_> {
         self.push(InsertComponentsCommand { entity, components });
     }
 
-    pub fn despawn_iter<F>(&self, mut f: F)
-    where
-        F: for<'b> FnMut(&'b Entity),
-    {
-        for cmd in self.despawns.iter() {
-            f(cmd.despawn_target())
-        }
+    pub fn despawn_iter<F>(&self) -> impl Iterator<Item = &DespawnCommand> {
+        self.despawns.iter()
     }
 
     pub(crate) fn push_fn<F>(&mut self, f: F)
@@ -109,12 +105,18 @@ impl<'a> SystemParam for Commands<'a> {
     }
 
     fn extract(world: &mut World, _data: &mut FunctionData) -> Self {
-        let queue_local = world.commands.queue.read().unwrap();
+        let queue_local = world.commands.queue.read();
         let despawns_local = world.commands.despawns.pin();
 
         unsafe {
-            let queue = std::mem::transmute(queue_local);
-            let despawns = std::mem::transmute(despawns_local);
+            let queue = std::mem::transmute::<
+                RwLockReadGuard<'_, RawRwLock, CommandQueue>,
+                RwLockReadGuard<'_, RawRwLock, CommandQueue>,
+            >(queue_local);
+            let despawns = std::mem::transmute::<
+                HashSetRef<'_, DespawnCommand, FxBuildHasher, LocalGuard<'_>>,
+                HashSetRef<'_, DespawnCommand, FxBuildHasher, LocalGuard<'_>>,
+            >(despawns_local);
 
             Self { queue, despawns }
         }

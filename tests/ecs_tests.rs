@@ -132,7 +132,7 @@ fn spawn_filter_targets(mut commands: Commands) {
 }
 
 fn verify_logical_queries(
-    or_query: Query<&Position, Or<With<TagA>, With<TagB>>>,
+    or_query: Query<&Position, Or<(With<TagA>, With<TagB>)>>,
     not_query: Query<&Position, (With<TagA>, Not<With<TagB>>)>,
 ) {
     let mut or_count = 0;

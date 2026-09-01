@@ -128,7 +128,7 @@ impl<'w, T: 'static> SystemParam for Option<Res<'w, T>> {
         let mut access = ParamAccess {
             ..Default::default()
         };
-        access.res_writes.push(std::any::TypeId::of::<T>());
+        access.res_reads.push(std::any::TypeId::of::<T>());
         access
     }
 

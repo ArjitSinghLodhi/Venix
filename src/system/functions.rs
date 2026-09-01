@@ -26,7 +26,7 @@ macro_rules! impl_system_for_functions {
         {
             type SystemType = FunctionSystem<($($param,)*), F>;
             fn into_system(self) -> Self::SystemType {
-                let params_access = vec![ $( <$param>::get_access(), )* ];
+                let params_access = [ $( <$param>::get_access(), )* ];
 
                 for param in &params_access {
                     let has_intra_read_write_conflict = param.writes.iter().any(|w| param.reads.vec.contains(w));

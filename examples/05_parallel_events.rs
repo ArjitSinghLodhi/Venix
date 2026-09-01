@@ -107,14 +107,14 @@ fn parallel_execution_system(
             });
 
             s.spawn(|| {
-                inline_read_count = reader.read().count();
+                inline_read_count = reader.iter().count();
             });
 
             s.spawn(|| {
                 par_reader_a.scope(|reader| {
-                    nest_read_a_count = reader.read().count();
+                    nest_read_a_count = reader.iter().count();
                     par_reader_b.scope(|reader| {
-                        nest_read_b_count = reader.read().count();
+                        nest_read_b_count = reader.iter().count();
                     });
                 });
             });
@@ -132,7 +132,7 @@ fn parallel_verification_system(
     par_reader_a: ParallelEventReader<ThreatEvent>,
     par_reader_b: ParallelEventReader<ThreatEvent>,
 ) {
-    let count = reader.read().count();
+    let count = reader.iter().count();
 
     if counter.current_frame == 2 {
         let mut base_count = 0;
@@ -140,7 +140,7 @@ fn parallel_verification_system(
         let mut nest_read_a_count = 0;
         let mut nest_read_b_count = 0;
 
-        for event in reader.read() {
+        for event in reader.iter() {
             if event.value == 100.0 {
                 base_count += 1;
             } else if event.value == 10.0 {
@@ -151,9 +151,9 @@ fn parallel_verification_system(
         std::thread::scope(|s| {
             s.spawn(|| {
                 par_reader_a.scope(|reader| {
-                    nest_read_a_count = reader.read().count();
+                    nest_read_a_count = reader.iter().count();
                     par_reader_b.scope(|reader| {
-                        nest_read_b_count = reader.read().count();
+                        nest_read_b_count = reader.iter().count();
                     });
                 });
             });

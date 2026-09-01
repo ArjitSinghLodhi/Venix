@@ -1,5 +1,5 @@
 use std::{
-    any::{TypeId, type_name},
+    any::TypeId,
     collections::VecDeque,
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -8,16 +8,19 @@ use fxhash::{FxBuildHasher, FxHashMap, FxHashSet};
 
 use crate::{
     app::plugin::PluginsBuildAll,
-    commands::{ParallelCommands, bundle::ComponentBundle},
-    events::{EventBuffer, ParallelEventReader, ParallelEventWriter, register_event},
-    extensions::SystemExt,
+    commands::ParallelCommands,
     schedule::{
         schedule::{IntoScheduleId, Schedule, ScheduleId, ScheduleLabel, SchedulePlace},
         schedules_list::Startup,
     },
-    system::validation::{IntoSystemConfigs, System, SystemId},
+    system::validation::{IntoSystemConfigs, System},
     world::storage::World,
 };
+
+#[cfg(feature = "events")]
+use crate::events::{EventBuffer, ParallelEventReader, ParallelEventWriter, register_event};
+#[cfg(feature = "events")]
+use std::any::type_name;
 
 static APP_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
@@ -94,7 +97,7 @@ pub struct App {
     pub(crate) world: World,
     schedules: Vec<Schedule>,
     plugins: Vec<Box<dyn PluginsBuildAll>>,
-    total_systems_blocks: Vec<SystemsBlock>,
+    systems_blocks: Vec<SystemsBlock>,
     runner_fn: fn(&mut App),
     configuration: ConfigurationContext,
 }
@@ -118,7 +121,7 @@ impl App {
             world: World::new(),
             schedules,
             plugins: Vec::new(),
-            total_systems_blocks: Vec::new(),
+            systems_blocks: Vec::new(),
             runner_fn: function,
             configuration: ConfigurationContext::new(),
         }
@@ -141,7 +144,7 @@ impl App {
             systems: Vec::new(),
         };
         systems.add_to_schedule(&mut block.systems);
-        self.total_systems_blocks.push(block);
+        self.systems_blocks.push(block);
         self
     }
 
@@ -151,13 +154,13 @@ impl App {
         self
     }
 
+    #[cfg(feature = "events")]
     pub fn init_event<T: 'static + Send + Sync>(&mut self) -> &mut Self {
         self.configuration.not_ready();
-        if self.world.get_resource_opt::<EventBuffer<T>>().is_none() {
-            self.world.insert_resource(EventBuffer::<T>::new());
-        } else {
+        if self.world.has_resource::<EventBuffer<T>>() {
             panic!("Event: {} Already initialized", type_name::<T>())
         }
+        self.world.insert_resource(EventBuffer::<T>::new());
         register_event::<T>();
         self
     }
@@ -209,6 +212,10 @@ impl App {
 }
 
 impl App {
+    pub fn has_resource<T: 'static>(&self) -> bool {
+        self.world.has_resource::<T>()
+    }
+
     pub fn get_resource<T: 'static>(&self) -> &T {
         self.world.get_resource::<T>()
     }
@@ -225,10 +232,6 @@ impl App {
         self.world.get_resource_mut_opt::<T>()
     }
 
-    pub fn pre_allocate_archetype<T: ComponentBundle>(&mut self) {
-        self.world.pre_allocate_archetype::<T>();
-    }
-
     pub fn apply_commands(&mut self) {
         self.world.apply_commands();
     }
@@ -241,10 +244,12 @@ impl App {
         self.world.get_par_commands()
     }
 
+    #[cfg(feature = "events")]
     pub fn get_par_event_writer<T: 'static + Send + Sync>(&mut self) -> ParallelEventWriter<T> {
         self.world.get_par_event_writer::<T>()
     }
 
+    #[cfg(feature = "events")]
     pub fn get_par_event_reader<T: 'static + Send + Sync>(&mut self) -> ParallelEventReader<T> {
         self.world.get_par_event_reader::<T>()
     }
@@ -262,7 +267,7 @@ impl App {
 
         while !self.plugins.is_empty() {
             let current_batch = std::mem::take(&mut self.plugins);
-            for plugin_group in &current_batch {
+            for plugin_group in current_batch.iter() {
                 for name in plugin_group.get_plugin_names() {
                     if !seen_plugins.insert(name) {
                         panic!(
@@ -272,7 +277,7 @@ impl App {
                     }
                 }
             }
-            for mut plugins_build_all in current_batch {
+            for plugins_build_all in current_batch {
                 plugins_build_all.build_all(self);
             }
         }
@@ -281,7 +286,7 @@ impl App {
     }
 
     fn configure_systems(&mut self) {
-        for system_block in self.total_systems_blocks.drain(..) {
+        for system_block in self.systems_blocks.drain(..) {
             let target_schedule = match self
                 .schedules
                 .iter_mut()
@@ -299,18 +304,6 @@ impl App {
 
             target_schedule.systems.extend(system_block.systems);
         }
-        let mut running_system_offset: u32 = 0;
-
-        for target_schedule in &mut self.schedules {
-            for (system_idx, sys) in target_schedule.systems.iter_mut().enumerate() {
-                let absolute_system_id = running_system_offset + (system_idx as u32);
-
-                let data = sys.get_or_init_mut::<SystemId>(|| SystemId::new(0));
-                data.id = absolute_system_id;
-            }
-            running_system_offset += target_schedule.systems.len() as u32;
-        }
-
         self.configuration.systems_added = true;
     }
 

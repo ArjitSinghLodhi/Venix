@@ -17,9 +17,9 @@ fn increment_frame_system(mut counter: ResMut<FrameCounter>) {
 }
 
 fn pre_emit_verify_system(counter: Res<FrameCounter>, reader: EventReader<ThreatEvent>) {
-    let count = reader.read().count();
+    let count = reader.iter().count();
     assert!(
-        reader.read().all(|event| event.value == 10.0),
+        reader.iter().all(|event| event.value == 10.0),
         "Value corrupted or not same"
     );
     if counter.current_frame == 1 {
@@ -50,9 +50,9 @@ fn emitter_system(counter: Res<FrameCounter>, mut writer: EventWriter<ThreatEven
 }
 
 fn post_emit_verify_system(counter: Res<FrameCounter>, reader: EventReader<ThreatEvent>) {
-    let count = reader.read().count();
+    let count = reader.iter().count();
     assert!(
-        reader.read().all(|event| event.value == 10.0),
+        reader.iter().all(|event| event.value == 10.0),
         "Value corrupted or not same"
     );
     if counter.current_frame == 1 {
@@ -151,16 +151,16 @@ fn parallel_execution_system(
             });
 
             s.spawn(|| {
-                read_a_count = reader_a.read().count();
-                read_b_count = reader_b.read().count();
+                read_a_count = reader_a.iter().count();
+                read_b_count = reader_b.iter().count();
             });
 
             s.spawn(|| {
                 par_reader_a.scope(|reader| {
-                    nest_read_a_count = reader.read().count();
+                    nest_read_a_count = reader.iter().count();
 
                     par_reader_b.scope(|reader| {
-                        nest_read_b_count = reader.read().count();
+                        nest_read_b_count = reader.iter().count();
                     });
                 });
             });
@@ -179,7 +179,7 @@ fn parallel_verification_system(
     par_reader_a: ParallelEventReader<ThreatEvent>,
     par_reader_b: ParallelEventReader<ThreatEvent>,
 ) {
-    let count = reader_a.read().count();
+    let count = reader_a.iter().count();
 
     if counter.current_frame == 2 {
         assert_eq!(count, 11);
@@ -189,7 +189,7 @@ fn parallel_verification_system(
         let mut nest_read_a_count = 0;
         let mut nest_read_b_count = 0;
 
-        for event in reader_a.read() {
+        for event in reader_a.iter() {
             if event.value == 100.0 {
                 base_count += 1;
             } else if event.value == 10.0 {
@@ -203,10 +203,10 @@ fn parallel_verification_system(
         thread::scope(|s| {
             s.spawn(|| {
                 par_reader_a.scope(|reader_a| {
-                    nest_read_a_count = reader_a.read().count();
+                    nest_read_a_count = reader_a.iter().count();
 
                     par_reader_b.scope(|reader_b| {
-                        nest_read_b_count = reader_b.read().count();
+                        nest_read_b_count = reader_b.iter().count();
                     });
                 });
             });

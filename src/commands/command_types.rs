@@ -1,6 +1,9 @@
 use fxhash::{FxBuildHasher, FxHashMap};
 use indexmap::{IndexMap, IndexSet};
-use std::any::TypeId;
+use std::{
+    any::TypeId,
+    sync::atomic::{AtomicU32, Ordering},
+};
 
 #[cfg(feature = "reactivity")]
 use crate::reactivity::TRACKED_COMPONENTS;
@@ -102,11 +105,7 @@ impl DespawnCommand {
         let (arch_id, target_idx) = unsafe {
             let cell_ptr = REGISTRY.get_ptr(target_registry_idx);
             let cell_arch_id = (*cell_ptr).archetype_id;
-            if (*cell_ptr)
-                .handle_count
-                .load(std::sync::atomic::Ordering::Relaxed)
-                > 0
-            {
+            if (*cell_ptr).handle_count.load(Ordering::Relaxed) > 0 {
                 let types_names = &&world
                     .archetypes_manager
                     .archetypes
@@ -345,7 +344,7 @@ fn alloc_registry_cell(archetype_id: ArchetypeId, dense_idx: u32, world: &mut Wo
             (*cell_ptr) = RegistryCell {
                 archetype_id,
                 idx: dense_idx,
-                handle_count: std::sync::atomic::AtomicU32::new(0),
+                handle_count: AtomicU32::new(0),
             };
         }
         recycled_idx
@@ -354,7 +353,7 @@ fn alloc_registry_cell(archetype_id: ArchetypeId, dense_idx: u32, world: &mut Wo
         (*registry_ptr).push(RegistryCell {
             archetype_id,
             idx: dense_idx,
-            handle_count: std::sync::atomic::AtomicU32::new(0),
+            handle_count: AtomicU32::new(0),
         });
         len
     }

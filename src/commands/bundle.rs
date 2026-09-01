@@ -8,6 +8,16 @@ pub trait ComponentBundle: 'static {
     const TYPE_IDS: &[TypeId];
     fn get_type_ids() -> &'static [TypeId];
     fn push_to_archetype(self, archetype: &mut Archetype);
+
+    /// # Safety
+    ///
+    /// * **Structural Alignment**: The caller must guarantee that the destination `archetype`
+    ///   is properly configured and contains the exact matching type columns required by this bundle.
+    /// * **Bounds Allocation**: The `row_idx` must be within the bounds of the allocated
+    ///   component arrays, or exactly equal to the current length to append data.
+    /// * **Memory Lifecycle**: If an active component already occupies `row_idx`, the implementation
+    ///   must safely run its destructor (`ptr::drop_in_place`) before overwriting it with `ptr::write`
+    ///   to prevent memory leaks.
     unsafe fn insert_to_archetype(self, archetype: &mut Archetype, row_idx: usize);
     fn create_empty_columns(columns: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>);
     type NamesArray: AsRef<[&'static str]>;
@@ -39,9 +49,7 @@ macro_rules! impl_component_tuple {
                 unsafe {
                     $(
                         let vec_ptr = archetype.fetch_column_raw::<$T>();
-                        if !vec_ptr.is_null() {
-                            (*vec_ptr).push($T);
-                        }
+                        (*vec_ptr).push($T);
                     )*
                 }
             }
@@ -51,14 +59,12 @@ macro_rules! impl_component_tuple {
                 unsafe {
                     $(
                         let vec_ptr = archetype.fetch_column_raw::<$T>();
-                        if !vec_ptr.is_null() {
-                            let vec_ref = &mut *vec_ptr;
-                            if row_idx < vec_ref.len() {
-                                std::ptr::drop_in_place(&mut vec_ref[row_idx]);
-                                std::ptr::write(&mut vec_ref[row_idx], $T);
-                            } else {
-                                vec_ref.push($T);
-                            }
+                        let vec_ref = &mut *vec_ptr;
+                        if row_idx < vec_ref.len() {
+                            std::ptr::drop_in_place(&mut vec_ref[row_idx]);
+                            std::ptr::write(&mut vec_ref[row_idx], $T);
+                        } else {
+                            vec_ref.push($T);
                         }
                     )*
                 }
