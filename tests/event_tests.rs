@@ -3,7 +3,6 @@ use std::thread;
 use venix::events::{EventReader, EventWriter};
 use venix::prelude::*;
 
-#[derive(Debug, Clone)]
 struct ThreatEvent {
     value: f32,
 }

@@ -1,7 +1,6 @@
 use venix::events::{EventReader, EventWriter};
 use venix::prelude::*;
 
-#[derive(Clone)]
 struct ThreatEvent {
     value: f32,
 }

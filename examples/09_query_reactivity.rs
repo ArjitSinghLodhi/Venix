@@ -1,16 +1,14 @@
 use std::thread::sleep;
 use std::time::Duration;
 use venix::prelude::*;
-
-#[derive(Debug)]
 struct Player;
-#[derive(Debug)]
+
 struct Score(u32);
-#[derive(Debug)]
+
 struct Buff {
     name: &'static str,
 }
-#[derive(Debug)]
+
 struct StatusEffect;
 
 struct GameLoopCounter {
