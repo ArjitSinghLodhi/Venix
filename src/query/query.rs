@@ -114,15 +114,24 @@ impl<Q: QueryData> ThreadSafeFetch<Q> {
 pub struct QueryArchetypeView<'a, Q: QueryData, I> {
     indices: &'a [usize],
     fetch: Q::Fetch,
+    total_entity_count: usize,
     archetype_id: ArchetypeId,
     _marker: std::marker::PhantomData<I>,
 }
 
 impl<'w, Q: QueryData, T> QueryArchetypeView<'w, Q, T> {
+    /// Gets the length of the filtered indices slice.
     #[inline(always)]
     pub fn len(&self) -> usize {
         self.indices.len()
     }
+
+    /// Gets the total length of the entities inside the archetype, including unfiltered ones.
+    #[inline(always)]
+    pub fn entities_len(&self) -> usize {
+        self.total_entity_count
+    }
+    
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -131,12 +140,38 @@ impl<'w, Q: QueryData, T> QueryArchetypeView<'w, Q, T> {
     /// # Safety
     ///
     /// The caller must ensure that:
-    /// - The **archetype data** referenced by `archetype_id` remains valid and is not mutated or structurally changed (e.g., via entity movement or destruction) while this `Fetch` is in use.
-    /// - Memory access via this `Fetch` is restricted strictly to the valid entity indices within **`indices`**.
-    /// - Aliasing rules are strictly followed; if `Q` requests **mutable access**, no other references to this data may exist simultaneously.
+    /// - The underlying archetype data referenced by this view remains structurally stable 
+    ///   (i.e., no entity movement, destruction, or layout changes occur) while the returned `Fetch` is in active use.
+    /// - Memory safety is guaranteed when accessing any index up to `entities_len()`. However, to preserve 
+    ///   query filtering invariants, lookups should be strictly confined to the indices provided by `get_indices()`.
+    /// - Aliasing rules are strictly observed: if a Fetch requests mutable access, no other references to this 
+    ///   archetype's component data may exist simultaneously.
     #[inline(always)]
     pub unsafe fn get_fetch(&self) -> Q::Fetch {
         self.fetch.clone()
+    }
+
+    /// # Safety
+    ///
+    /// - `index` must be strictly less than `entities_len()` to prevent out-of-bounds memory corruption.
+    /// - The caller must guarantee that exclusive, mutable access to the underlying item at `index` 
+    ///   is maintained globally (no simultaneous aliasing reads or writes from other queries/threads).
+    #[inline(always)]
+    pub unsafe fn fetch_mut<'a>(&'a self, index: usize) -> Q::Item<'a> {
+        // Fix: Changed return lifetime from 'w to 'a to tie the returned component borrow 
+        // to the short-lived accessor scope, preventing dangerous concurrent mutable aliasing.
+        unsafe { Q::fetch_mut(self.fetch, index) }
+    }
+
+    /// # Safety
+    ///
+    /// - `index` must be strictly less than `entities_len()`.
+    /// - Shared read access must be synchronized; no concurrent mutable borrows (`&mut`) may exist 
+    ///   for this specific entity item anywhere in the execution frame.
+    #[inline(always)]
+    pub unsafe fn fetch_read_only<'a>(&'a self, index: usize) -> Q::ReadOnlyItem<'a> {
+        // Fix: Bound the read-only item to the short accessor lifetime 'a
+        unsafe { Q::fetch_read_only(self.fetch, index) }
     }
 
     #[inline(always)]
@@ -370,6 +405,7 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
                 QueryArchetypeView {
                     indices: &self.cached_indices[arch_idx],
                     fetch: self.cached_fetches[arch_idx].unwrap().0,
+                    total_entity_count: arch.entities.len(),
                     archetype_id: arch.id,
                     _marker: PhantomData,
                 }
@@ -388,6 +424,7 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
                 QueryArchetypeView {
                     indices: &self.cached_indices[arch_idx],
                     fetch: self.cached_fetches[arch_idx].unwrap().0,
+                    total_entity_count: arch.entities.len(),
                     archetype_id: arch.id,
                     _marker: PhantomData,
                 }
@@ -408,6 +445,7 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
                 QueryArchetypeView {
                     indices: &cached_indices[arch_idx],
                     fetch: cached_fetches[arch_idx].unwrap().0,
+                    total_entity_count: arch.entities.len(),
                     archetype_id: arch.id,
                     _marker: PhantomData,
                 }
@@ -426,6 +464,7 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
                 QueryArchetypeView {
                     indices: &self.cached_indices[arch_idx],
                     fetch: self.cached_fetches[arch_idx].unwrap().0,
+                    total_entity_count: arch.entities.len(),
                     archetype_id: arch.id,
                     _marker: PhantomData,
                 }
