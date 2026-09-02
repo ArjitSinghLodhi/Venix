@@ -133,7 +133,7 @@ impl Archetype {
 pub(crate) struct ArchetypeManager {
     index: FxHashMap<u64, ArchetypeId>,
     pub(crate) archetypes: FxHashMap<ArchetypeId, Archetype>,
-    next_id: u32,
+    pub(crate) next_id: u32,
 }
 
 impl ArchetypeManager {

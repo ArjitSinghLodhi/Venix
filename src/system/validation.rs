@@ -108,8 +108,8 @@ pub trait SystemExt {
     fn get_data<T: 'static>(&self) -> Option<&T>;
     fn get_data_mut<T: 'static>(&mut self) -> Option<&mut T>;
     fn insert<T: 'static>(&mut self, value: T);
-    fn get_or_init<T: 'static, F: FnOnce() -> T>(&mut self, init: F) -> &T;
-    fn get_or_init_mut<T: 'static, F: FnOnce() -> T>(&mut self, init: F) -> &mut T;
+    fn get_or_init<T: 'static>(&mut self, init: impl FnOnce() -> T) -> &T;
+    fn get_or_init_mut<T: 'static>(&mut self, init: impl FnOnce() -> T) -> &mut T;
 }
 
 impl<S: SystemData + ?Sized> SystemExt for S {
@@ -127,10 +127,9 @@ impl<S: SystemData + ?Sized> SystemExt for S {
         self.insert_raw(TypeId::of::<T>(), Box::new(value));
     }
 
-    fn get_or_init<T, F>(&mut self, init: F) -> &T
+    fn get_or_init<T>(&mut self, init: impl FnOnce() -> T) -> &T
     where
         T: 'static,
-        F: FnOnce() -> T,
     {
         let id = TypeId::of::<T>();
         if self.get_raw(id).is_none() {
@@ -139,10 +138,9 @@ impl<S: SystemData + ?Sized> SystemExt for S {
         self.get_data::<T>().unwrap()
     }
 
-    fn get_or_init_mut<T, F>(&mut self, init: F) -> &mut T
+    fn get_or_init_mut<T>(&mut self, init: impl FnOnce() -> T) -> &mut T
     where
         T: 'static,
-        F: FnOnce() -> T,
     {
         let id = TypeId::of::<T>();
         if self.get_raw(id).is_none() {
@@ -174,13 +172,13 @@ impl FunctionData {
             .get_mut(&TypeId::of::<T>())
             .and_then(|any| any.downcast_mut::<T>())
     }
-    pub fn get_or_init<T: 'static, F: FnOnce() -> T>(&mut self, init: F) -> &T {
+    pub fn get_or_init<T: 'static>(&mut self, init: impl FnOnce() -> T) -> &T {
         let id = TypeId::of::<T>();
         let entry = self.data.entry(id).or_insert_with(|| Box::new(init()));
         entry.downcast_ref::<T>().unwrap()
     }
 
-    pub fn get_or_init_mut<T: 'static, F: FnOnce() -> T>(&mut self, init: F) -> &mut T {
+    pub fn get_or_init_mut<T: 'static>(&mut self, init: impl FnOnce() -> T) -> &mut T {
         let id = TypeId::of::<T>();
         let entry = self.data.entry(id).or_insert_with(|| Box::new(init()));
         entry.downcast_mut::<T>().unwrap()
@@ -197,8 +195,8 @@ impl FunctionData {
     pub(crate) fn get_raw_data_mut(&mut self, type_id: &TypeId) -> Option<&mut Box<dyn Any>> {
         self.data.get_mut(type_id)
     }
-    pub(crate) fn insert_raw_data(&mut self, type_id: TypeId, value: Box<dyn Any>) {
-        self.data.insert(type_id, value);
+    pub(crate) fn insert_raw_data(&mut self, type_id: &TypeId, value: Box<dyn Any>) {
+        self.data.insert(*type_id, value);
     }
 }
 
@@ -229,7 +227,7 @@ impl<Marker, F> SystemData for FunctionSystem<Marker, F> {
     }
 
     fn insert_raw(&mut self, id: TypeId, value: Box<dyn Any>) {
-        self.data.insert_raw_data(id, value);
+        self.data.insert_raw_data(&id, value);
     }
 }
 

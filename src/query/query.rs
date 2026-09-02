@@ -1,8 +1,7 @@
 use fxhash::FxBuildHasher;
 use indexmap::IndexSet;
 use rayon::iter::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
-    IntoParallelRefMutIterator, ParallelIterator,
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
 };
 use std::{any::TypeId, marker::PhantomData};
 
@@ -127,6 +126,22 @@ impl<'w, Q: QueryData, T> QueryArchetypeView<'w, Q, T> {
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// # Safety
+    ///
+    /// The caller must ensure that:
+    /// - The **archetype data** referenced by `archetype_id` remains valid and is not mutated or structurally changed (e.g., via entity movement or destruction) while this `Fetch` is in use.
+    /// - Memory access via this `Fetch` is restricted strictly to the valid entity indices within **`indices`**.
+    /// - Aliasing rules are strictly followed; if `Q` requests **mutable access**, no other references to this data may exist simultaneously.
+    #[inline(always)]
+    pub unsafe fn get_fetch(&self) -> Q::Fetch {
+        self.fetch.clone()
+    }
+
+    #[inline(always)]
+    pub fn get_indices(&self) -> &'w [usize] {
+        self.indices
     }
 }
 
@@ -403,7 +418,7 @@ impl<'q, Q: QueryData, F: QueryFilter> Query<'q, Q, F> {
         &'a mut self,
     ) -> impl ParallelIterator<Item = QueryArchetypeView<'a, Q, Mutable>> {
         self.matching_archetypes
-            .par_iter_mut()
+            .par_iter()
             .flatten()
             .map(|arch_ptr| {
                 let arch = unsafe { &*arch_ptr.0 };
