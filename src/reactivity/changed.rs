@@ -10,7 +10,7 @@ use std::any::TypeId;
 use std::marker::PhantomData;
 
 pub(crate) fn register_tracked_component<T: 'static>() {
-    let mut tracked = TRACKED_COMPONENTS.write().unwrap();
+    let mut tracked = TRACKED_COMPONENTS.write();
     let component_id = TypeId::of::<T>();
 
     if !tracked.iter().any(|m| m.component_id == component_id) {
@@ -41,16 +41,32 @@ pub(crate) fn register_tracked_component<T: 'static>() {
 
 #[derive(Clone, Copy)]
 pub struct ChangedMarker<T> {
-    markers: [bool; 2],
+    pub(crate) markers: [bool; 2],
     phantom: PhantomData<T>,
 }
 
+/// A query data wrapper that allows systems to inspect the change state of an individual component instance.
+///
+/// Unlike the [`Changed<T>`] filter, which excludes non-modified entities from the query entirely,
+/// `ChangedTracker<T>` allows the entity to match the query while exposing the [`.is_changed()`] method
+/// to check its status conditionally.
+///
+/// # Architecture & Timing
+///
+/// This tracking relies on the exact same double-buffered, frame-locked system as the filter:
+///
+/// * **Frame 1:** The target component is mutably modified. The tracking bool is set but remains hidden.
+/// * **Frame 2:** [`.is_changed()`] evaluates to `true` globally across this entire frame window.
+/// * **Frame 3:** The flag is automatically purged and resets to `false`, regardless of system execution.
+///
+/// [`.is_changed()`]: ChangedTracker::is_changed
 pub struct ChangedTracker<T> {
     changed: bool,
     _marker: PhantomData<T>,
 }
 
 impl<T> ChangedTracker<T> {
+    /// Returns whether the target component was mutably modified during the previous frame.
     #[inline(always)]
     pub fn is_changed(&self) -> bool {
         self.changed
@@ -99,7 +115,21 @@ impl<T: 'static> QueryData for ChangedTracker<T> {
         }
     }
 }
+
+/// A query filter that matches components of type `T` that were mutably modified during the previous frame.
+///
+/// # Architecture & Timing
+///
+/// Change detection in Venix is globally double-buffered and strictly time-bound. It is **not** tracking
+/// individual systems or reading history. The visibility window follows a strict 3-frame lifecycle:
+///
+/// * **Frame 1 (Modification):** The component is mutably accessed or modified. The change is registered internally but is **not** yet visible to queries.
+/// * **Frame 2 (Detection Window):** The change becomes globally visible. Any system running in this frame filtering for `Changed<T>` will detect it.
+/// * **Frame 3 (Purge):** The change state is unconditionally cleared.
+///
+/// Regardless of whether a system ran or read the data, the detection flag will never last for more than exactly one frame.
 pub struct Changed<T>(std::marker::PhantomData<T>);
+
 impl<T: 'static> QueryFilter for Changed<T> {
     fn matches(types: &AccessHashSet<TypeId>) -> bool {
         types.contains(&TypeId::of::<ChangedMarker<T>>())

@@ -131,7 +131,7 @@ impl<'w, Q: QueryData, T> QueryArchetypeView<'w, Q, T> {
     pub fn entities_len(&self) -> usize {
         self.total_entity_count
     }
-    
+
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -140,11 +140,11 @@ impl<'w, Q: QueryData, T> QueryArchetypeView<'w, Q, T> {
     /// # Safety
     ///
     /// The caller must ensure that:
-    /// - The underlying archetype data referenced by this view remains structurally stable 
+    /// - The underlying archetype data referenced by this view remains structurally stable
     ///   (i.e., no entity movement, destruction, or layout changes occur) while the returned `Fetch` is in active use.
-    /// - Memory safety is guaranteed when accessing any index up to `entities_len()`. However, to preserve 
+    /// - Memory safety is guaranteed when accessing any index up to `entities_len()`. However, to preserve
     ///   query filtering invariants, lookups should be strictly confined to the indices provided by `get_indices()`.
-    /// - Aliasing rules are strictly observed: if a Fetch requests mutable access, no other references to this 
+    /// - Aliasing rules are strictly observed: if a Fetch requests mutable access, no other references to this
     ///   archetype's component data may exist simultaneously.
     #[inline(always)]
     pub unsafe fn get_fetch(&self) -> Q::Fetch {
@@ -154,11 +154,11 @@ impl<'w, Q: QueryData, T> QueryArchetypeView<'w, Q, T> {
     /// # Safety
     ///
     /// - `index` must be strictly less than `entities_len()` to prevent out-of-bounds memory corruption.
-    /// - The caller must guarantee that exclusive, mutable access to the underlying item at `index` 
+    /// - The caller must guarantee that exclusive, mutable access to the underlying item at `index`
     ///   is maintained globally (no simultaneous aliasing reads or writes from other queries/threads).
     #[inline(always)]
     pub unsafe fn fetch_mut<'a>(&'a self, index: usize) -> Q::Item<'a> {
-        // Fix: Changed return lifetime from 'w to 'a to tie the returned component borrow 
+        // Fix: Changed return lifetime from 'w to 'a to tie the returned component borrow
         // to the short-lived accessor scope, preventing dangerous concurrent mutable aliasing.
         unsafe { Q::fetch_mut(self.fetch, index) }
     }
@@ -166,7 +166,7 @@ impl<'w, Q: QueryData, T> QueryArchetypeView<'w, Q, T> {
     /// # Safety
     ///
     /// - `index` must be strictly less than `entities_len()`.
-    /// - Shared read access must be synchronized; no concurrent mutable borrows (`&mut`) may exist 
+    /// - Shared read access must be synchronized; no concurrent mutable borrows (`&mut`) may exist
     ///   for this specific entity item anywhere in the execution frame.
     #[inline(always)]
     pub unsafe fn fetch_read_only<'a>(&'a self, index: usize) -> Q::ReadOnlyItem<'a> {

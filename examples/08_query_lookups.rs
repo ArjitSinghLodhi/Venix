@@ -43,7 +43,7 @@ fn simple_global_lookup_system(
             #[allow(unused_mut)]
             if let Some(mut health) = query_health.get_mut(entity) {
                 if health.0 == 100 {
-                    println!("\n[Simple Lookup] Executing global Query-level O(1) map fetch:");
+                    println!("\n[Simple Lookup] Executing Query-level O(1) fetch:");
                     println!("   -> Located Player Entity via view extraction loop.");
                     println!("   -> Initial Player health: {}", health.0);
                     health.0 -= 20;

@@ -156,13 +156,12 @@ impl ArchetypeManager {
 
     #[cfg(feature = "reactivity")]
     pub(crate) fn sync_tracking_markers(&self, types: &mut IndexSet<TypeId, FxBuildHasher>) {
-        if let Ok(tracked) = TRACKED_COMPONENTS.read() {
-            for meta in tracked.iter() {
-                if types.contains(&meta.component_id) {
-                    types.insert(meta.marker_id);
-                } else {
-                    types.swap_remove(&meta.marker_id);
-                }
+        let tracked = TRACKED_COMPONENTS.read();
+        for meta in tracked.iter() {
+            if types.contains(&meta.component_id) {
+                types.insert(meta.marker_id);
+            } else {
+                types.swap_remove(&meta.marker_id);
             }
         }
     }
@@ -255,7 +254,8 @@ impl ArchetypeManager {
         T::create_empty_columns(&mut columns);
 
         #[cfg(feature = "reactivity")]
-        if let Ok(tracked) = TRACKED_COMPONENTS.read() {
+        {
+            let tracked = TRACKED_COMPONENTS.read();
             tracked
                 .iter()
                 .filter(|m| types_set.contains(&m.marker_id))
@@ -263,7 +263,6 @@ impl ArchetypeManager {
                     columns.insert(m.marker_id, (m.create_marker_column)());
                 });
         }
-
         let new_arch = Archetype::new(new_id, types_set, columns, types_names_set);
         self.index.insert(order_independent_hash, new_id);
         self.archetypes.insert(new_id, new_arch);

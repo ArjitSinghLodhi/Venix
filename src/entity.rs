@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering;
 
-use crate::registry::REGISTRY;
+use crate::registry::REGISTRY_HANDLE_COUNT;
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Entity {
@@ -20,20 +20,18 @@ impl Entity {
 impl Clone for Entity {
     fn clone(&self) -> Self {
         unsafe {
-            let cell_ptr = REGISTRY.get_ptr(self.registry_idx() as usize);
-            (*cell_ptr).handle_count.fetch_add(1, Ordering::Relaxed);
+            let atomic_ptr = REGISTRY_HANDLE_COUNT.get_ptr(self.registry_idx() as usize);
+            (*atomic_ptr).fetch_add(1, Ordering::Relaxed);
         }
-        Entity {
-            registry_index: self.registry_index,
-        }
+        Entity::new(self.registry_index)
     }
 }
 
 impl Drop for Entity {
     fn drop(&mut self) {
         unsafe {
-            let cell_ptr = REGISTRY.get_ptr(self.registry_idx() as usize);
-            (*cell_ptr).handle_count.fetch_sub(1, Ordering::Relaxed);
+            let atomic_ptr = REGISTRY_HANDLE_COUNT.get_ptr(self.registry_idx() as usize);
+            (*atomic_ptr).fetch_sub(1, Ordering::Relaxed);
         }
     }
 }

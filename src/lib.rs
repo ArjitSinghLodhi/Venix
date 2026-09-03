@@ -1,3 +1,17 @@
+//! # Venix Engine
+//!
+//! ## Core Architecture Invariants
+//!
+//! To maintain absolute safety and high performance, Venix enforces strict operational rules:
+//!
+//! * **Entity Despawn Invariant:** All cloned handles referencing an entity must be completely dropped
+//!   before that entity's scheduled despawn command is executed. Violating this triggers an explicit runtime
+//!   panic displaying the archetype's components. See [`DefaultSchedulesPlugin`] for how the built-in
+//!   schedules are designed to help with this, and read [`Commands::despawn()`] for more information.
+//!
+//! [`DefaultSchedulesPlugin`]: crate::schedule::DefaultSchedulesPlugin
+//! [`Commands::despawn()`]: crate::commands::Commands::despawn
+
 #![allow(clippy::module_inception)]
 
 pub mod app;

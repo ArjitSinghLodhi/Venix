@@ -1,9 +1,6 @@
 use fxhash::{FxBuildHasher, FxHashMap};
 use indexmap::{IndexMap, IndexSet};
-use std::{
-    any::TypeId,
-    sync::atomic::{AtomicU32, Ordering},
-};
+use std::{any::TypeId, sync::atomic::AtomicU32};
 
 #[cfg(feature = "reactivity")]
 use crate::reactivity::TRACKED_COMPONENTS;
@@ -11,7 +8,7 @@ use crate::{
     commands::{bundle::ComponentBundle, command_queue::WorldCommand},
     entity::Entity,
     extensions::{Archetype, ComponentColumn, World},
-    registry::{REGISTRY, RegistryCell},
+    registry::{REGISTRY, REGISTRY_HANDLE_COUNT, RegistryData},
     world::archetypes::{AnyColumn, ArchetypeId},
 };
 
@@ -94,7 +91,7 @@ impl<T: ComponentBundle + Send> WorldCommand for BatchSpawnCommand<T> {
     }
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[repr(transparent)]
 pub struct DespawnCommand {
     pub(crate) entity: Entity,
 }
@@ -103,22 +100,27 @@ impl DespawnCommand {
     pub(crate) fn apply(&self, world: &mut World) {
         let target_registry_idx = self.entity.registry_index as usize;
         let (arch_id, target_idx) = unsafe {
-            let cell_ptr = REGISTRY.get_ptr(target_registry_idx);
-            let cell_arch_id = (*cell_ptr).archetype_id;
-            if (*cell_ptr).handle_count.load(Ordering::Relaxed) > 0 {
+            let data_ptr = REGISTRY.get_ptr(target_registry_idx);
+            let arch_id = (*data_ptr).archetype_id;
+            let handle_count = REGISTRY_HANDLE_COUNT.get_count(target_registry_idx);
+            if handle_count > 0 {
                 let types_names = &&world
                     .archetypes_manager
                     .archetypes
-                    .get(&(*cell_ptr).archetype_id)
-                    .unwrap()
+                    .get(&arch_id)
+                    .unwrap_unchecked()
                     .type_names;
                 panic!(
-                    "Safety Violation: Attempted to despawn an Entity while active handles are still held! of archetype:\n{:?}",
+                    "\n\
+                    Venix Handle Violation: Cloned handles for an entity were not dropped before despawn execution!\n\
+                    Entity Archetype Component Names: {:?}\n\
+                    Refer to the `DefaultSchedulesPlugin` and `Commands::despawn` documentation to understand how to coordinate handle cleanup.\n\
+                    ",
                     types_names
                 );
             }
 
-            (cell_arch_id, (*cell_ptr).idx)
+            (arch_id, (*data_ptr).idx)
         };
 
         let arch = world
@@ -241,8 +243,8 @@ impl<T: ComponentBundle + Send> WorldCommand for InsertComponentsCommand<T> {
             let new_dense_idx = new_arch.entities.len() as u32;
 
             {
-                let new_cols = &mut *new_arch.columns.get();
-                let old_cols = &mut *old_arch.columns.get();
+                let new_cols = new_arch.columns.get_mut();
+                let old_cols = old_arch.columns.get_mut();
 
                 if new_cols.is_empty() {
                     T::create_empty_columns(new_cols);
@@ -258,7 +260,7 @@ impl<T: ComponentBundle + Send> WorldCommand for InsertComponentsCommand<T> {
 
             #[cfg(feature = "reactivity")]
             {
-                let fresh_new_cols = &mut *new_arch.columns.get();
+                let fresh_new_cols = new_arch.columns.get_mut();
                 migrate_addition_markers(&old_arch.types, incoming_ids, fresh_new_cols);
             }
 
@@ -336,25 +338,26 @@ fn update_registry_cell(registry_idx: usize, archetype_id: ArchetypeId, dense_id
     }
 }
 
+#[inline(always)]
 fn alloc_registry_cell(archetype_id: ArchetypeId, dense_idx: u32, world: &mut World) -> u32 {
-    let registry_ptr = &REGISTRY;
     if let Some(recycled_idx) = world.free_indices_list.pop() {
         unsafe {
-            let cell_ptr = REGISTRY.get_mut_ptr(recycled_idx as usize);
-            (*cell_ptr) = RegistryCell {
+            let data_ptr = REGISTRY.get_mut_ptr(recycled_idx as usize);
+            (*data_ptr) = RegistryData {
                 archetype_id,
                 idx: dense_idx,
-                handle_count: AtomicU32::new(0),
             };
+            let count_ptr = REGISTRY_HANDLE_COUNT.get_mut_ptr(recycled_idx as usize);
+            (*count_ptr) = AtomicU32::new(0);
         }
         recycled_idx
     } else {
-        let len = (*registry_ptr).len() as u32;
-        (*registry_ptr).push(RegistryCell {
+        let len = REGISTRY.len() as u32;
+        REGISTRY.push(RegistryData {
             archetype_id,
             idx: dense_idx,
-            handle_count: AtomicU32::new(0),
         });
+        REGISTRY_HANDLE_COUNT.push(AtomicU32::new(0));
         len
     }
 }
@@ -507,7 +510,7 @@ unsafe fn swap_remove_entity_registry_update(arch: &mut Archetype, removed_row_i
 #[cfg(feature = "reactivity")]
 #[inline(always)]
 fn initialize_spawn_markers(columns: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>) {
-    let tracked = TRACKED_COMPONENTS.read().unwrap();
+    let tracked = TRACKED_COMPONENTS.read();
     for meta in tracked.iter() {
         if let Some(marker_column) = columns.get_mut(&meta.marker_id) {
             unsafe { (meta.push_default_marker)(marker_column) };
@@ -521,7 +524,7 @@ fn initialize_batch_spawn_markers(
     columns: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
     batch_size: usize,
 ) {
-    let tracked = TRACKED_COMPONENTS.read().unwrap();
+    let tracked = TRACKED_COMPONENTS.read();
     for meta in tracked.iter() {
         if let Some(marker_column) = columns.get_mut(&meta.marker_id) {
             for _ in 0..batch_size {
@@ -537,7 +540,7 @@ fn initialize_missing_archetype_markers(
     types: &IndexSet<TypeId, FxBuildHasher>,
     columns: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
 ) {
-    let tracked = TRACKED_COMPONENTS.read().unwrap();
+    let tracked = TRACKED_COMPONENTS.read();
     for meta in tracked.iter() {
         if types.contains(&meta.marker_id) && !columns.contains_key(&meta.marker_id) {
             columns.insert(meta.marker_id, (meta.create_marker_column)());
@@ -552,7 +555,7 @@ unsafe fn migrate_addition_markers(
     incoming_ids: &[TypeId],
     new_cols: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
 ) {
-    let tracked = TRACKED_COMPONENTS.read().unwrap();
+    let tracked = TRACKED_COMPONENTS.read();
     for meta in tracked.iter() {
         if new_cols.contains_key(&meta.marker_id) {
             if old_types.contains(&meta.marker_id) {
@@ -574,7 +577,7 @@ unsafe fn erase_subtracted_markers(
     old_cols: &mut IndexMap<TypeId, ComponentColumn, FxBuildHasher>,
     row_idx: usize,
 ) {
-    let tracked = TRACKED_COMPONENTS.read().unwrap();
+    let tracked = TRACKED_COMPONENTS.read();
     for meta in tracked.iter() {
         if old_types.contains(&meta.marker_id)
             && !new_types.contains(&meta.marker_id)

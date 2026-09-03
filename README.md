@@ -91,6 +91,20 @@ Tracker Updates Token Hidden      Visible to Queries              Token Decays /
 
 ---
 
+### The Entity Despawn Invariant
+
+Venix enforces a strict handles invariant to maintain memory safety and structural integrity across parallel schedules.
+
+> [!IMPORTANT]
+> **The Rule:** All cloned handles referencing an entity must be completely dropped before that entity's queued despawn command is applied.
+
+* **Deferred Execution:** Calling `commands.despawn(entity)` does not kill the entity or panic right away; it merely registers a deferred command to be processed later.
+* **The Panic:** The engine panics during the command execution phase if any cloned handles for that target entity are still active when the queue flushes.
+* **The Diagnostic:** The panic text prints a clean `HashSet` containing the exact `std::any::type_name` of every component within that entity's archetype, making it easy to identify the problematic entity type.
+* **The Resolution:** For projects using the `DefaultSchedulesPlugin`, look into its documentation to understand how some schedules are deliberately structured to help you use `despawn_iter` and `will_despawn` to satisfy this requirement.
+
+---
+
 ## 🛠️ Feature & Module Matrix
 
 ### Procedural Macro Derives (`feature = "derive"`)

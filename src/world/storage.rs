@@ -7,9 +7,10 @@ use std::{
 #[cfg(feature = "events")]
 use crate::events::{ParallelEventReader, ParallelEventWriter, TRACKED_EVENTS};
 use crate::{
-    commands::{CommandBuffer, ParallelCommands},
+    commands::{CommandBuffer, DespawnCommand, ParallelCommands},
+    entity::Entity,
     extensions::{FunctionData, SystemParam},
-    registry::REGISTRY,
+    registry::REGISTRY_HANDLE_COUNT,
     world::archetypes::ArchetypeManager,
 };
 
@@ -121,18 +122,28 @@ impl World {
     }
 
     pub fn apply_commands(&mut self) {
+        self.apply_queue_commands();
+        self.apply_despawns();
+    }
+
+    pub fn apply_queue_commands(&mut self) {
         let queue_arc = self.commands.queue.clone();
         let mut queue_gaurd = queue_arc.write();
         queue_gaurd.apply(self);
+    }
+
+    pub fn apply_despawns(&mut self) {
         let despawns_arc = self.commands.despawns.clone();
         let despawns = despawns_arc.pin();
-        despawns.retain(|despawn_cmd| {
-            unsafe {
-                REGISTRY.decrement_handle(despawn_cmd.entity.registry_index as usize);
+        for entity_ref in despawns.iter() {
+            if despawns.remove(entity_ref) {
+                unsafe {
+                    REGISTRY_HANDLE_COUNT.decrement_handle(entity_ref.registry_index as usize);
+                }
+                let cmd_ref = unsafe { &*(entity_ref as *const Entity as *const DespawnCommand) };
+                cmd_ref.apply(self);
             }
-            despawn_cmd.apply(self);
-            false
-        });
+        }
     }
 
     pub(crate) fn end_of_frame_sync(&mut self) {
@@ -145,7 +156,7 @@ impl World {
 
     #[cfg(feature = "reactivity")]
     fn clear_trackers(&mut self) {
-        let tracked = TRACKED_COMPONENTS.read().unwrap();
+        let tracked = TRACKED_COMPONENTS.read();
 
         for archetype in self.archetypes_manager.archetypes.values_mut() {
             unsafe {
@@ -173,14 +184,27 @@ impl World {
         }
     }
 
+    /// Returns a thread-safe, thread-clonable [`ParallelCommands`] handle.
+    ///
+    /// For detailed architecture, lifecycle invariants, and usage details,
+    /// see [`crate::app::App::get_par_commands()`].
     pub fn get_par_commands(&mut self) -> ParallelCommands {
         ParallelCommands::extract(self, &mut FunctionData::new())
     }
 
+    /// Returns a thread-safe, thread-clonable [`ParallelEventWriter`] handle.
+    ///
+    /// For detailed architecture, lifecycle invariants, and usage details,
+    /// see [`crate::app::App::get_par_event_writer()`].
     #[cfg(feature = "events")]
     pub fn get_par_event_writer<T: 'static + Send + Sync>(&mut self) -> ParallelEventWriter<T> {
         ParallelEventWriter::extract(self, &mut FunctionData::new())
     }
+
+    /// Returns a thread-safe, thread-clonable [`ParallelEventReader`] handle.
+    ///
+    /// For detailed architecture, lifecycle invariants, and usage details,
+    /// see [`crate::app::App::get_par_event_reader()`].
     #[cfg(feature = "events")]
     pub fn get_par_event_reader<T: 'static + Send + Sync>(&mut self) -> ParallelEventReader<T> {
         ParallelEventReader::extract(self, &mut FunctionData::new())

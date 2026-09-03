@@ -157,9 +157,9 @@ dependencies = [
 
 [[package]]
 name = "orx-concurrent-iter"
-version = "4.1.0"
+version = "4.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49dcb7d153086067a1cbfda330b3891d70b8d4a8ad2d2f3015dbb4403830df20"
+checksum = "16243445a173377b84a82f7edc2556f93f730f35a2f0ed5dfd959537b38b30a5"
 dependencies = [
  "orx-iterable",
  "orx-pseudo-default",
@@ -367,9 +367,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.15.2"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
+checksum = "b9be42f50aa861c555654aa3a37f52f4b1074bacf4e48fe0ef7fa584e80f1f0f"
 
 [[package]]
 name = "syn"
@@ -403,7 +403,7 @@ checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
 name = "venix"
-version = "3.0.4"
+version = "3.1.0"
 dependencies = [
  "fxhash",
  "indexmap",

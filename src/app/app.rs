@@ -236,19 +236,42 @@ impl App {
         self.world.apply_commands();
     }
 
+    pub fn apply_queue_commands(&mut self) {
+        self.world.apply_queue_commands();
+    }
+
+    pub fn apply_despawns(&mut self) {
+        self.world.apply_despawns();
+    }
+
     pub fn end_of_frame_sync(&mut self) {
         self.world.end_of_frame_sync();
     }
 
+    /// Returns a thread-safe, thread-clonable [`ParallelCommands`] handle.
+    ///
+    /// This method can be called directly on the `App` or `World` to obtain a detached,
+    /// safe remote input into the engine's command pipeline, manageable by external or
+    /// parallel background worker threads.
     pub fn get_par_commands(&mut self) -> ParallelCommands {
         self.world.get_par_commands()
     }
 
+    /// Returns a thread-safe, thread-clonable [`ParallelEventWriter`] handle.
+    ///
+    /// This method can be called directly on the `App` or `World` to obtain a detached,
+    /// safe remote output channel into the engine's event queue, manageable by external
+    /// or parallel background worker threads.
     #[cfg(feature = "events")]
     pub fn get_par_event_writer<T: 'static + Send + Sync>(&mut self) -> ParallelEventWriter<T> {
         self.world.get_par_event_writer::<T>()
     }
 
+    /// Returns a thread-safe, thread-clonable [`ParallelEventReader`] handle.
+    ///
+    /// This method can be called directly on the `App` or `World` to obtain a detached,
+    /// safe remote input channel to inspect the engine's event queue from external or
+    /// parallel background worker threads.
     #[cfg(feature = "events")]
     pub fn get_par_event_reader<T: 'static + Send + Sync>(&mut self) -> ParallelEventReader<T> {
         self.world.get_par_event_reader::<T>()
@@ -290,7 +313,7 @@ impl App {
             let target_schedule = match self
                 .schedules
                 .iter_mut()
-                .find(|s| s.schedule.id_from_self() == system_block.schedule_id)
+                .find(|s| s.schedule.type_id() == system_block.schedule_id.id)
             {
                 Some(schedule) => schedule,
                 None => {
@@ -313,15 +336,15 @@ impl App {
         let mut schedule_map: FxHashMap<TypeId, Schedule> =
             FxHashMap::with_capacity_and_hasher(unarranged.len(), FxBuildHasher::new());
         for s in unarranged {
-            let id = s.schedule.id_from_self();
-            if schedule_map.contains_key(&id.id) {
+            let id = s.schedule.type_id();
+            if schedule_map.contains_key(&id) {
                 let name = s.schedule.name();
                 panic!(
                     "❌ CONFIGURATION ERROR: Duplicate Schedule detected for '{}'!",
                     name
                 );
             }
-            schedule_map.insert(id.id, s);
+            schedule_map.insert(id, s);
         }
 
         let startup_id = TypeId::of::<Startup>();
@@ -341,7 +364,7 @@ impl App {
         }
 
         for (id, schedule) in &schedule_map {
-            if schedule.schedule.id_from_self() == Startup::id() {
+            if schedule.schedule.type_id() == TypeId::of::<Startup>() {
                 continue;
             }
             let place = schedule.schedule.get_place();

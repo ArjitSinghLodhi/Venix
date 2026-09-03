@@ -56,14 +56,29 @@ impl ScheduleLabel for PostUpdate {
     }
 }
 
+/// A special schedule where queue commands are applied before your systems run as well as after your systems have ran.
 pub struct CleanupHandles;
 
 impl ScheduleLabel for CleanupHandles {
     fn get_place(&self) -> SchedulePlace {
         SchedulePlace::After(Update::id())
     }
+
+    fn runner_fn() -> fn(&mut dyn ScheduleLabel, &mut World, &mut [Box<dyn System>])
+    where
+        Self: Sized,
+    {
+        |_, world, systems| {
+            world.apply_queue_commands();
+            for system in systems.iter_mut() {
+                system.run(world);
+            }
+            world.apply_queue_commands();
+        }
+    }
 }
 
+/// A special schedule where your systems run then queue commands are applied and then despawns are applied.
 pub struct ApplyCommands;
 
 impl ScheduleLabel for ApplyCommands {
@@ -78,7 +93,8 @@ impl ScheduleLabel for ApplyCommands {
             for system in systems.iter_mut() {
                 system.run(world);
             }
-            world.apply_commands();
+            world.apply_queue_commands();
+            world.apply_despawns();
         }
     }
 }

@@ -1,4 +1,4 @@
-use std::any::Any;
+use std::any::{Any, type_name};
 
 use crate::{system::validation::System, world::storage::World};
 
@@ -8,12 +8,16 @@ pub struct ScheduleId {
     pub(crate) name: &'static str,
 }
 
-pub trait IntoScheduleId<T: 'static>: ScheduleLabel {
+pub trait IntoScheduleId<T: 'static + ?Sized>: ScheduleLabel {
     fn id() -> ScheduleId {
         ScheduleId {
             id: std::any::TypeId::of::<T>(),
             name: std::any::type_name::<T>(),
         }
+    }
+
+    fn name(&self) -> &'static str {
+        type_name::<T>()
     }
 }
 
@@ -23,7 +27,7 @@ impl PartialEq for ScheduleId {
     }
 }
 
-impl<T: ScheduleLabel> IntoScheduleId<T> for T {}
+impl<T: ?Sized + ScheduleLabel> IntoScheduleId<T> for T {}
 
 #[derive(Clone, Copy)]
 pub enum SchedulePlace {
@@ -60,17 +64,6 @@ where
                 system.run(world);
             }
         }
-    }
-
-    fn id_from_self(&self) -> ScheduleId {
-        ScheduleId {
-            id: self.type_id(),
-            name: self.name(),
-        }
-    }
-
-    fn name(&self) -> &'static str {
-        std::any::type_name::<Self>()
     }
 }
 

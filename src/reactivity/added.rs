@@ -11,7 +11,7 @@ use crate::{
 };
 
 pub(crate) fn register_added_tracked_component<T: 'static>() {
-    let mut tracked = TRACKED_COMPONENTS.write().unwrap();
+    let mut tracked = TRACKED_COMPONENTS.write();
     if !tracked
         .iter()
         .any(|meta| meta.component_id == TypeId::of::<T>())
@@ -49,7 +49,19 @@ pub struct AddedMarker<T> {
     phantom: PhantomData<T>,
 }
 
-pub struct Added<T>(PhantomData<T>);
+/// A query filter that matches components of type `T` that were newly added during the previous frame.
+///
+/// # Architecture & Timing
+///
+/// Component addition tracking in Venix is globally double-buffered and strictly time-bound.
+/// It operates on a strict 3-frame lifecycle:
+///
+/// * **Frame 1 (Addition):** The component is structurally added or spawned. The tracking bool is set internally but is **not** yet visible to queries.
+/// * **Frame 2 (Detection Window):** The addition becomes globally visible. Any system running in this frame filtering for `Added<T>` will detect it.
+/// * **Frame 3 (Purge):** The addition state is unconditionally cleared and resets to `false`.
+///
+/// Regardless of whether a system ran or read the data, the detection flag will never last for more than exactly one frame.
+pub struct Added<T>(std::marker::PhantomData<T>);
 
 impl<T: 'static> QueryFilter for Added<T> {
     fn matches(types: &crate::extensions::AccessHashSet<TypeId>) -> bool {
@@ -75,12 +87,29 @@ impl<T: 'static> QueryFilter for Added<T> {
     }
 }
 
+/// A query data wrapper that allows systems to inspect the addition state of an individual component instance.
+///
+/// Unlike the [`Added<T>`] filter, which excludes non-added entities from the query entirely,
+/// `AddedTracker<T>` allows the entity to match the query while exposing the [`.is_added()`] method
+/// to check its status conditionally.
+///
+/// # Architecture & Timing
+///
+/// This tracking relies on the exact same double-buffered, frame-locked system as the filter:
+///
+/// * **Frame 1:** The target component is added or spawned. The tracking bool is set but remains hidden.
+/// * **Frame 2:** [`.is_added()`] evaluates to `true` globally across this entire frame window.
+/// * **Frame 3:** The flag is automatically purged and resets to `false`, regardless of system execution.
+///
+/// [`.is_added()`]: AddedTracker::is_added
 pub struct AddedTracker<T> {
     added: bool,
     _phantom: PhantomData<T>,
 }
 
 impl<T: 'static> AddedTracker<T> {
+    /// Returns whether the target component was newly added to the entity during the previous frame.
+    #[inline(always)]
     pub fn is_added(&self) -> bool {
         self.added
     }
