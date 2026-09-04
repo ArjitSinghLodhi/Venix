@@ -1,6 +1,6 @@
 [package]
 name = "venix"
-version = "3.1.1"
+version = "3.1.2"
 edition = "2024"
 description = "A high-performance, archetype-based ECS engine written in Rust."
 readme = "README.md"
@@ -19,6 +19,7 @@ papaya = "0.2.5"
 parking_lot = "0.12.5"
 
 [dev-dependencies]
+criterion = "0.8.2"
 rusty-fork = "0.3.1"
 
 [lib]
@@ -103,3 +104,50 @@ required-features = ["derive"]
 [[example]]
 name = "hirearchy_cleanup"
 path = "examples/despawning/hirearchy_cleanup.rs"
+
+[[bench]]
+name = "query_lookups_fragmented"
+path = "benches/query_lookups_fragmented.rs"
+harness = false
+
+[[bench]]
+name = "query_lookups_fragmented_heavy"
+path = "benches/query_lookups_fragmented_heavy.rs"
+harness = false
+
+[[bench]]
+name = "query_lookups"
+path = "benches/query_lookups.rs"
+harness = false
+
+[[bench]]
+name = "query_lookups_heavy"
+path = "benches/query_lookups_heavy.rs"
+harness = false
+
+[[bench]]
+name = "query_simple_iter"
+path = "benches/query_simple_iter.rs"
+harness = false
+
+[[bench]]
+name = "query_fragmented_iter"
+path = "benches/query_fragmented_iter.rs"
+harness = false
+
+[[bench]]
+name = "query_write_pure"
+path = "benches/query_write_pure.rs"
+harness = false
+
+[[bench]]
+name = "query_write_reactive_untracked"
+path = "benches/query_write_reactive_untracked.rs"
+harness = false
+required-features = ["reactivity"]
+
+[[bench]]
+name = "query_write_reactive_tracked"
+path = "benches/query_write_reactive_tracked.rs"
+harness = false
+required-features = ["reactivity"]

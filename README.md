@@ -30,7 +30,7 @@ Venix v3.x.x is the complete, stable baseline for the ecs. The core traits and a
 * **🌐 De-coupled Thread Spawning**  
   Supports extracting concurrent execution handlers (`app.get_par_commands()`) completely outside system loops, allowing long-running background threads to safely queue entity spawns asynchronously.
 * **📡 Thread-Independent Event Broadcasting**  
-  Allows external background workers or network threads to pull standalone event handles (`app.get_par_event_writer::<T>()`) to broadcast global notifications out-of-band cleanly.
+  Allows external background workers or network threads to pull standalone event handles (`app.get_par_event_writer::<T>()`, `app.get_par_event_reader::<T>()`) to broadcast global notifications out-of-band cleanly or read them with synchronization, see their documentation for more information.
 
 ---
 
@@ -127,6 +127,54 @@ Venix by default compiles strictly as a data container (`default = []`). Scale t
 * `events` – Activates high-concurrency event broadcasting pipelines (`EventWriter`, `EventReader`, `ParallelEventWriter`, etc.).
 
 ---
+
+## Random Lookup Performance
+
+The following data details random access lookup metrics using Criterion benchmarks. Target handle vectors are scrambled prior to execution to invalidate the CPU hardware prefetcher and force cache-line evictions.
+
+### Test Hardware Profile
+* **System:** Lenovo LOQ 15IAX9
+* **Processor:** Intel Core i5 12th Gen
+* **Operating System:** Linux
+
+### Environment A: 100,000 Total Entities (Uniform Layout)
+Measures baseline index routing speed in a clean world containing 100,000 uniform components.
+
+* **4-Byte Component Payload (`query_lookups`)**
+  * `query.get(entity)`: **1.16 ns** per lookup (116.58 µs total execution time)
+  * `query.get_unchecked(entity)`: **0.75 ns** per lookup (75.91 µs total execution time)
+* **256-Byte Heavy Payload (`query_lookups_heavy`)**
+  * `query.get(entity)`: **1.17 ns** per lookup (117.49 µs total execution time)
+  * `query.get_unchecked(entity)`: **0.76 ns** per lookup (76.31 µs total execution time)
+
+### Environment B: 2,000,000 Total Entities (High Fragmentation)
+Evaluates 100,000 target lookups scattered across a pool of 2,000,000 total background entities, fragmented across 5 distinct archetype tables to induce maximum cache line saturation pressure.
+
+* **4-Byte Component Payload (`query_lookups_fragmented`)**
+  * `query.get(entity)`: **1.64 ns** per lookup (164.04 µs total execution time)
+  * `query.get_unchecked(entity)`: **1.15 ns** per lookup (115.51 µs total execution time)
+* **256-Byte Heavy Payload (`query_lookups_fragmented_heavy`)**
+  * `query.get(entity)`: **1.62 ns** per lookup (162.00 µs total execution time)
+  * `query.get_unchecked(entity)`: **1.15 ns** per lookup (115.26 µs total execution time)
+
+## Linear Iteration & Reactivity Performance
+
+The following data evaluates linear iteration and mutation speeds over 10,000 entities under varying compilation flags and component states.
+
+### Environment C: 10,000 Entities (Sequential Loop Pass)
+
+* **Contiguous Memory Loop (`query_simple_iter`)**
+  * Total execution time: **9.64 µs**
+* **4-Archetype Split Memory Loop (`query_fragmented_iter`)**
+  * Total execution time: **9.67 µs**
+* **Pure Mutable Write - Feature Off (`query_write_pure`)**
+  * Total execution time: **9.50 µs**
+* **Reactive Feature On - Untracked Component (`query_write_reactive_untracked`)**
+  * Total execution time: **11.36 µs**
+* **Reactive Feature On - Tracked Component, Unfiltered System (`query_write_reactive_tracked`)**
+  * `tracked_but_unfiltered_write`: **20.82 µs** total execution time
+* **Reactive Feature On - Tracked Component, Filtered System (`query_write_reactive_tracked`)**
+  * `tracked_and_filtered_write`: **1.03 ns** total execution time
 
 ## 📜 License
 

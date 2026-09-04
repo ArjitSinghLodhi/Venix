@@ -38,7 +38,7 @@ fn automatic_hierarchy_linker_system(
     for view in link_query.iter() {
         for (child_entity, link_comp) in view.iter() {
             let parent_target = link_comp.parent.clone();
-
+            #[allow(unused_mut)]
             if let Some(mut parent_comp) = parent_query.get_mut(&parent_target) {
                 parent_comp.children.push(child_entity.clone());
 
@@ -62,6 +62,7 @@ fn hirearchy_cleanup(
 ) {
     for despawn_cmd in commands1.despawn_iter() {
         let dead_entity = despawn_cmd.despawn_target();
+        #[allow(unused_mut)]
         if let Some((entity, mut parent_comp)) = parent_query.get_mut(dead_entity) {
             println!("Hierarchy Plugin: Parent matched. Queueing recursive child deletion!");
             while let Some(child_handle) = parent_comp.children.pop() {
