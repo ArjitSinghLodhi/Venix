@@ -72,12 +72,15 @@ impl<T: 'static + Send + Sync> EventQueue<T> {
 /// Event handling in Venix is globally double-buffered and strictly time-bound. It operates
 /// on the exact same 3-frame lifecycle used by component tracking (`Added` and `Changed` flags):
 ///
-/// * **Frame 1 (Sending):** Events sent via `.send()` or `.send_batch()` are safely queued in the active write buffer but remain hidden from readers.
+/// * **Frame 1 (Sending):** Events sent via [`.send`] or [`.send_batch`] are safely queued in the active write buffer but remain hidden from readers.
 /// * **Frame 2 (Reading Window):** The internal buffers swap globally, making these events visible to event readers.
 /// * **Frame 3 (Purge):** The buffer is cleared. Events are unconditionally dropped, regardless of whether any systems read them.
 ///
 /// Because event visibility lasts for exactly one frame window, any system designed to process these events
 /// **must run every single frame** to avoid missing data.
+/// 
+/// [`.send`]: EventWriter::send
+/// [`.send_batch`]: EventWriter::send_batch
 pub struct EventWriter<'a, T: 'static + Send + Sync> {
     pub(crate) write_buffer: RwLockReadGuard<'a, EventQueue<T>>,
 }
@@ -123,9 +126,6 @@ impl<'a, T: 'static + Send + Sync> SystemParam for EventWriter<'a, T> {
     }
 }
 
-unsafe impl<'w, T: 'static + Send + Sync> Send for EventWriter<'w, T> {}
-unsafe impl<'w, T: 'static + Send + Sync> Sync for EventWriter<'w, T> {}
-
 /// A system parameter used to read dispatched events of type `T` from the engine's event queue.
 ///
 /// # Architecture & Timing
@@ -166,6 +166,3 @@ impl<'w, T: 'static + Send + Sync> SystemParam for EventReader<'w, T> {
         Self { read_buffer: queue }
     }
 }
-
-unsafe impl<'w, T: 'static + Send + Sync> Send for EventReader<'w, T> {}
-unsafe impl<'w, T: 'static + Send + Sync> Sync for EventReader<'w, T> {}

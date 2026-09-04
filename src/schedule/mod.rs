@@ -8,15 +8,21 @@ use crate::{
 pub mod schedule;
 pub mod schedules_list;
 
-/// The plugin to register the default schedules list: (`First`, `PreUpdate`, `Update`, `PostUpdate`, `CleanupHandles`, `ApplyCommands`, `Last`).
+/// A plugin that registers the default execution schedules: 
+/// `First`, `PreUpdate`, `Update`, `PostUpdate`, `CleanupHandles`, `ApplyCommands`, and `Last`.
 ///
-/// Out of all these, the `CleanupHandles` and `ApplyCommands` schedules are special:
+/// Among these, the `CleanupHandles` and `ApplyCommands` schedules serve special purposes:
 ///
-/// * **`CleanupHandles`**: Queue commands are applied right before your systems run, as well as immediately after all your systems have run.
-/// * **`ApplyCommands`**: Your systems run, then queue commands are applied, and finally despawns are applied.
+/// * **`CleanupHandles`**: Queue commands (such as spawning and adding components) are applied 
+///   immediately before and after the systems registered in this schedule run. Despawn commands 
+///   are **not** applied yet.
+/// * **`ApplyCommands`**: Systems in this schedule run, followed by the execution of 
+///   queue commands, and finally, despawn commands are processed.
 ///
-/// This is a deliberate mechanism built to help you use the [`Commands::despawn_iter()`] and [`Commands::will_despawn()`]
-/// functions to obey Venix's strict rule: *All cloned handles referencing an entity must be dropped before the entity's despawn command is applied.*
+/// This sequence is a deliberate mechanism designed to facilitate the use of the 
+/// [`Commands::despawn_iter()`] and [`Commands::will_despawn()`] functions. It ensures adherence 
+/// to Venix's strict rule: *All cloned handles referencing an entity must be dropped before 
+/// the entity's despawn command is applied.*
 ///
 /// [`Commands::despawn_iter()`]: crate::commands::Commands::despawn_iter
 /// [`Commands::will_despawn()`]: crate::commands::Commands::will_despawn

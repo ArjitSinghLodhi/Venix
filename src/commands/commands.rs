@@ -71,7 +71,7 @@ impl Commands<'_> {
     ///
     /// # Panics
     ///
-    /// The engine panics during the command execution phase if any cloned handles referencing this entity
+    /// The engine panics during the despawn command execution phase if any cloned handles referencing this entity
     /// are still active when the queued despawn command is applied.
     ///
     /// The panic message will display a `HashSet` containing the `std::any::type_name`
@@ -127,14 +127,15 @@ impl Commands<'_> {
 
     /// Returns an iterator over all currently queued despawn commands.
     ///
-    /// This allows you to inspect which entities are scheduled for removal, allowing you to pass
-    /// the entity retrieved from `.despawn_target()` into your Query lookup functions to safely
+    /// This allows you to inspect which entities are scheduled for removal. You can pass
+    /// the entity retrieved from [`despawn_target()`] into your query lookup functions to safely
     /// access and drop any active cloned handles.
     ///
     /// See [`DefaultSchedulesPlugin`] to understand how the engine's schedules are structured
     /// to coordinate this iterator with handle cleanup requirements.
     ///
-    /// [`DefaultSchedulesPlugin`]: crate::schedule::DefaultSchedulesPlugin.
+    /// [`despawn_target()`]: crate::commands::command_types::DespawnCommand::despawn_target
+    /// [`DefaultSchedulesPlugin`]: crate::schedule::DefaultSchedulesPlugin
     pub fn despawn_iter(&self) -> impl Iterator<Item = &DespawnCommand> {
         self.despawns
             .iter()
@@ -143,15 +144,15 @@ impl Commands<'_> {
 
     /// Returns whether the specified entity is currently scheduled for removal.
     ///
-    /// This performs an O(1) lookup via an internal `HashSet::contains` check, making it
+    /// This performs an `O(1)` lookup via an internal `HashSet::contains` check, making it
     /// highly efficient to call within heavy system loops. Use this check to conditionally
-    /// bypass logic or drop active cloned handles via Query lookup functions before the
+    /// bypass logic or drop active cloned handles via query lookup functions before the
     /// cleanup phase completes.
     ///
     /// See [`DefaultSchedulesPlugin`] to understand how the engine's schedules are structured
     /// to coordinate this check with handle cleanup requirements.
     ///
-    /// [`DefaultSchedulesPlugin`]: crate::schedule::DefaultSchedulesPlugin.
+    /// [`DefaultSchedulesPlugin`]: crate::schedule::DefaultSchedulesPlugin
     pub fn will_despawn(&self, entity: &Entity) -> bool {
         self.despawns.contains(entity)
     }
