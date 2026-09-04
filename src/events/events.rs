@@ -78,7 +78,7 @@ impl<T: 'static + Send + Sync> EventQueue<T> {
 ///
 /// Because event visibility lasts for exactly one frame window, any system designed to process these events
 /// **must run every single frame** to avoid missing data.
-/// 
+///
 /// [`.send`]: EventWriter::send
 /// [`.send_batch`]: EventWriter::send_batch
 pub struct EventWriter<'a, T: 'static + Send + Sync> {

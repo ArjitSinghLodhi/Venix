@@ -1,6 +1,6 @@
 [package]
 name = "venix"
-version = "3.1.2"
+version = "3.1.3"
 edition = "2024"
 description = "A high-performance, archetype-based ECS engine written in Rust."
 readme = "README.md"
@@ -15,8 +15,8 @@ fxhash = "0.2.1"
 indexmap = "2.14.0"
 rayon = "1.12.0"
 orx-concurrent-bag = "4.0.1"
-papaya = "0.2.5"
 parking_lot = "0.12.5"
+dashmap = {version = "6.2.1", default-features = false, features = ["raw-api"]}
 
 [dev-dependencies]
 criterion = "0.8.2"

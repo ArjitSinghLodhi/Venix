@@ -133,14 +133,14 @@ impl World {
     }
 
     pub fn apply_despawns(&mut self) {
-        let despawns_arc = self.commands.despawns.clone();
-        let despawns = despawns_arc.pin();
-        for entity_ref in despawns.iter() {
-            if despawns.remove(entity_ref) {
+        let despawns = self.commands.despawns.clone();
+        for shard in despawns.shards() {
+            let mut lock = shard.write();
+            for (entity_ref, _) in lock.drain() {
                 unsafe {
                     REGISTRY_HANDLE_COUNT.decrement_handle(entity_ref.registry_index as usize);
                 }
-                let cmd_ref = unsafe { &*(entity_ref as *const Entity as *const DespawnCommand) };
+                let cmd_ref = unsafe { &*(&entity_ref as *const Entity as *const DespawnCommand) };
                 cmd_ref.apply(self);
             }
         }

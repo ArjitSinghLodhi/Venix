@@ -1,11 +1,25 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use venix::prelude::*;
 
-pub struct Transform { pub matrix: [f32; 16] }
-pub struct Position { pub x: f32, pub y: f32, pub z: f32 }
-pub struct Rotation { pub x: f32, pub y: f32, pub z: f32 }
-pub struct Velocity { pub x: f32, pub y: f32, pub z: f32 }
+pub struct Transform {
+    pub matrix: [f32; 16],
+}
+pub struct Position {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+pub struct Rotation {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+pub struct Velocity {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
 
 pub struct StructuralTagA;
 pub struct StructuralTagB;
@@ -23,9 +37,21 @@ fn setup_fragmented_world(mut commands: Commands, mut state: ResMut<BenchState>)
 
     for i in 0..10_000 {
         let transform = Transform { matrix: [0.0; 16] };
-        let position = Position { x: 0.0, y: 0.0, z: 0.0 };
-        let rotation = Rotation { x: 0.0, y: 0.0, z: 0.0 };
-        let velocity = Velocity { x: 1.0, y: 1.0, z: 1.0 };
+        let position = Position {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let rotation = Rotation {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let velocity = Velocity {
+            x: 1.0,
+            y: 1.0,
+            z: 1.0,
+        };
 
         match i % 4 {
             0 => {
@@ -47,10 +73,7 @@ fn setup_fragmented_world(mut commands: Commands, mut state: ResMut<BenchState>)
     println!("[ECS Bench Setup] Fragmentation complete. 4 distinct archetypes generated.");
 }
 
-fn run_fragmented_iter_bench(
-    mut query: Query<(&mut Position, &Velocity)>, 
-    state: Res<BenchState>
-) {
+fn run_fragmented_iter_bench(mut query: Query<(&mut Position, &Velocity)>, state: Res<BenchState>) {
     if !state.initialized {
         return;
     }
@@ -75,7 +98,7 @@ fn run_fragmented_iter_bench(
 fn run_bench_timeline(app: &mut App) {
     app.build();
     app.run_startup();
-    app.update(); 
+    app.update();
 }
 
 fn bench_entry_point(_c: &mut Criterion) {

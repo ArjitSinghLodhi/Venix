@@ -56,7 +56,7 @@ impl ScheduleLabel for PostUpdate {
     }
 }
 
-/// A special schedule where queue commands are applied immediately before 
+/// A special schedule where queue commands are applied immediately before
 /// and after the systems registered in this schedule run. Despawn commands are not applied yet.
 ///
 /// See [`DefaultSchedulesPlugin`] for more information on the execution order.
@@ -83,7 +83,7 @@ impl ScheduleLabel for CleanupHandles {
     }
 }
 
-/// A special schedule where systems registered in this schedule run, 
+/// A special schedule where systems registered in this schedule run,
 /// followed by the execution of queue commands, and finally, despawn commands are processed.
 ///
 /// See [`DefaultSchedulesPlugin`] for more information on the execution order.

@@ -1,10 +1,15 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use venix::prelude::*;
 
 pub struct Foo(pub f32);
-pub struct Velocity { pub x: f32, pub y: f32 }
-pub struct Health { pub hp: i32 }
+pub struct Velocity {
+    pub x: f32,
+    pub y: f32,
+}
+pub struct Health {
+    pub hp: i32,
+}
 pub struct Renderable;
 pub struct StaticBody;
 pub struct BenchmarkTarget;
@@ -16,9 +21,12 @@ criterion_main!(benches);
 
 fn setup_fragmented_world(mut commands: Commands) {
     let spawn_count = 2_000_000;
-    println!("Allocation Phase: Spawning {} highly fragmented entities...", spawn_count);
-    
-    let mut rng_seed = 0x853C205A_u64; 
+    println!(
+        "Allocation Phase: Spawning {} highly fragmented entities...",
+        spawn_count
+    );
+
+    let mut rng_seed = 0x853C205A_u64;
     let mut assigned_targets = 0;
 
     for _ in 0..spawn_count {
@@ -28,7 +36,11 @@ fn setup_fragmented_world(mut commands: Commands) {
         match rng_seed % 5 {
             0 => {
                 if assigned_targets < 100_000 {
-                    commands.spawn((Foo(assigned_targets as f32), Velocity { x: 1.0, y: 1.0 }, BenchmarkTarget));
+                    commands.spawn((
+                        Foo(assigned_targets as f32),
+                        Velocity { x: 1.0, y: 1.0 },
+                        BenchmarkTarget,
+                    ));
                     assigned_targets += 1;
                 } else {
                     commands.spawn((Foo(0.0), Velocity { x: 1.0, y: 1.0 }));
@@ -48,11 +60,14 @@ fn setup_fragmented_world(mut commands: Commands) {
             }
         }
     }
-    println!("--> Allocation Complete. Targets placed: {}", assigned_targets);
+    println!(
+        "--> Allocation Complete. Targets placed: {}",
+        assigned_targets
+    );
 }
 
 fn collect_and_scramble_targets(
-    query: Query<Entity, With<BenchmarkTarget>>, 
+    query: Query<Entity, With<BenchmarkTarget>>,
     mut targets: ResMut<BenchmarkTargets>,
 ) {
     if !targets.entities.is_empty() {
@@ -64,7 +79,10 @@ fn collect_and_scramble_targets(
         }
     }
 
-    println!("Target Tracking: Isolated exactly {} original benchmark targets.", targets.entities.len());
+    println!(
+        "Target Tracking: Isolated exactly {} original benchmark targets.",
+        targets.entities.len()
+    );
     println!("Scrambling handles to guarantee cold CPU cache line misses...");
 
     let mut rng_seed = 0x7FFF_FFFF_u64;
@@ -86,25 +104,19 @@ fn run_fragmented_criterion_bench(query: Query<&Foo>, targets: Res<BenchmarkTarg
     let mut group = c.benchmark_group("ecs_massive_fragmentation");
     let target_count = targets.entities.len();
 
-    group.bench_with_input(
-        "venix_safe_fragmented_lookup",
-        &target_count,
-
-        |b, _| {
-            b.iter(|| {
-                for entity in &targets.entities {
-                    if let Some(foo) = query.get(entity) {
-                        black_box(foo);
-                    }
+    group.bench_with_input("venix_safe_fragmented_lookup", &target_count, |b, _| {
+        b.iter(|| {
+            for entity in &targets.entities {
+                if let Some(foo) = query.get(entity) {
+                    black_box(foo);
                 }
-            });
-        },
-    );
+            }
+        });
+    });
 
     group.bench_with_input(
         "venix_unchecked_fragmented_lookup",
         &target_count,
-
         |b, _| {
             b.iter(|| {
                 for entity in &targets.entities {
@@ -122,13 +134,15 @@ fn run_fragmented_criterion_bench(query: Query<&Foo>, targets: Res<BenchmarkTarg
 fn run_bench_timeline(app: &mut App) {
     app.build();
     app.run_startup();
-    app.update();  
+    app.update();
 }
 
 fn bench_entry_point(_c: &mut Criterion) {
     App::new()
         .add_plugins(DefaultSchedulesPlugin)
-        .insert_resource(BenchmarkTargets {entities: Vec::new()})
+        .insert_resource(BenchmarkTargets {
+            entities: Vec::new(),
+        })
         .add_systems(Startup::id(), setup_fragmented_world)
         .add_systems(Update::id(), collect_and_scramble_targets)
         .add_systems(Update::id(), run_fragmented_criterion_bench)

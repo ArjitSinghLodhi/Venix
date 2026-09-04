@@ -1,9 +1,12 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use venix::prelude::*;
 
 pub struct Foo(pub f32);
-pub struct Velocity { pub x: f32, pub y: f32 }
+pub struct Velocity {
+    pub x: f32,
+    pub y: f32,
+}
 pub struct BenchmarkTarget;
 pub struct BenchmarkTargets {
     pub entities: Vec<Entity>,
@@ -13,7 +16,10 @@ criterion_main!(benches);
 
 fn setup_fragmented_world(mut commands: Commands) {
     let spawn_count = 100_000;
-    println!("Allocation Phase: Spawning {} benchmark entities...", spawn_count);
+    println!(
+        "Allocation Phase: Spawning {} benchmark entities...",
+        spawn_count
+    );
     for _ in 0..spawn_count {
         commands.spawn((Foo(0.0), Velocity { x: 1.0, y: 1.0 }, BenchmarkTarget));
     }
@@ -21,7 +27,7 @@ fn setup_fragmented_world(mut commands: Commands) {
 }
 
 fn collect_and_scramble_targets(
-    query: Query<Entity, With<BenchmarkTarget>>, 
+    query: Query<Entity, With<BenchmarkTarget>>,
     mut targets: ResMut<BenchmarkTargets>,
 ) {
     if !targets.entities.is_empty() {
@@ -55,25 +61,19 @@ fn run_fragmented_criterion_bench(query: Query<&Foo>, targets: Res<BenchmarkTarg
     let mut group = c.benchmark_group("ecs_massive_fragmentation");
     let target_count = targets.entities.len();
 
-    group.bench_with_input(
-        "venix_safe_fragmented_lookup",
-        &target_count,
-
-        |b, _| {
-            b.iter(|| {
-                for entity in &targets.entities {
-                    if let Some(foo) = query.get(entity) {
-                        black_box(foo);
-                    }
+    group.bench_with_input("venix_safe_fragmented_lookup", &target_count, |b, _| {
+        b.iter(|| {
+            for entity in &targets.entities {
+                if let Some(foo) = query.get(entity) {
+                    black_box(foo);
                 }
-            });
-        },
-    );
+            }
+        });
+    });
 
     group.bench_with_input(
         "venix_unchecked_fragmented_lookup",
         &target_count,
-
         |b, _| {
             b.iter(|| {
                 for entity in &targets.entities {
@@ -91,13 +91,15 @@ fn run_fragmented_criterion_bench(query: Query<&Foo>, targets: Res<BenchmarkTarg
 fn run_bench_timeline(app: &mut App) {
     app.build();
     app.run_startup();
-    app.update();  
+    app.update();
 }
 
 fn bench_entry_point(_c: &mut Criterion) {
     App::new()
         .add_plugins(DefaultSchedulesPlugin)
-        .insert_resource(BenchmarkTargets {entities: Vec::new()})
+        .insert_resource(BenchmarkTargets {
+            entities: Vec::new(),
+        })
         .add_systems(Startup::id(), setup_fragmented_world)
         .add_systems(Update::id(), collect_and_scramble_targets)
         .add_systems(Update::id(), run_fragmented_criterion_bench)

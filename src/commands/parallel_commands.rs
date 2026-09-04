@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
+use dashmap::DashSet;
 use fxhash::FxBuildHasher;
-use papaya::HashSet;
 use parking_lot::RwLock;
 
 use crate::commands::command_queue::CommandQueue;
@@ -32,7 +32,7 @@ use crate::world::storage::World;
 #[derive(Clone)]
 pub struct ParallelCommands {
     pub(crate) queue: Arc<RwLock<CommandQueue>>,
-    pub(crate) despawns: Arc<HashSet<Entity, FxBuildHasher>>,
+    pub(crate) despawns: Arc<DashSet<Entity, FxBuildHasher>>,
 }
 
 impl ParallelCommands {
@@ -46,7 +46,7 @@ impl ParallelCommands {
     {
         let commands = Commands {
             queue: self.queue.read(),
-            despawns: self.despawns.pin(),
+            despawns: self.despawns.clone(),
         };
         f(commands)
     }

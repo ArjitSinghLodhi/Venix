@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, sync::Arc};
 
+use dashmap::DashSet;
 use fxhash::FxBuildHasher;
-use papaya::{HashSet, HashSetRef, LocalGuard};
 use parking_lot::{RawRwLock, RwLock, lock_api::RwLockReadGuard};
 
 use crate::{
@@ -21,21 +21,21 @@ use crate::{
 
 pub(crate) struct CommandBuffer {
     pub(crate) queue: Arc<RwLock<CommandQueue>>,
-    pub(crate) despawns: Arc<HashSet<Entity, FxBuildHasher>>,
+    pub(crate) despawns: Arc<DashSet<Entity, FxBuildHasher>>,
 }
 
 impl CommandBuffer {
     pub fn new() -> Self {
         Self {
             queue: Arc::new(RwLock::new(CommandQueue::new())),
-            despawns: Arc::new(HashSet::with_hasher(FxBuildHasher::new())),
+            despawns: Arc::new(DashSet::with_hasher(FxBuildHasher::new())),
         }
     }
 }
 
 pub struct Commands<'a> {
     pub(crate) queue: parking_lot::RwLockReadGuard<'a, CommandQueue>,
-    pub(crate) despawns: HashSetRef<'a, Entity, FxBuildHasher, LocalGuard<'a>>,
+    pub(crate) despawns: Arc<DashSet<Entity, FxBuildHasher>>,
 }
 
 impl Commands<'_> {
@@ -137,9 +137,9 @@ impl Commands<'_> {
     /// [`despawn_target()`]: crate::commands::command_types::DespawnCommand::despawn_target
     /// [`DefaultSchedulesPlugin`]: crate::schedule::DefaultSchedulesPlugin
     pub fn despawn_iter(&self) -> impl Iterator<Item = &DespawnCommand> {
-        self.despawns
-            .iter()
-            .map(|entity_ref| unsafe { &*(entity_ref as *const Entity as *const DespawnCommand) })
+        self.despawns.iter().map(|entity_ref| unsafe {
+            &*(&(*entity_ref) as *const Entity as *const DespawnCommand)
+        })
     }
 
     /// Returns whether the specified entity is currently scheduled for removal.
@@ -190,19 +190,17 @@ impl<'a> SystemParam for Commands<'a> {
 
     fn extract(world: &mut World, _data: &mut FunctionData) -> Self {
         let queue_local = world.commands.queue.read();
-        let despawns_local = world.commands.despawns.pin();
+        let despawns_arc = world.commands.despawns.clone();
 
         unsafe {
             let queue = std::mem::transmute::<
                 RwLockReadGuard<'_, RawRwLock, CommandQueue>,
                 RwLockReadGuard<'_, RawRwLock, CommandQueue>,
             >(queue_local);
-            let despawns = std::mem::transmute::<
-                HashSetRef<'_, Entity, FxBuildHasher, LocalGuard<'_>>,
-                HashSetRef<'_, Entity, FxBuildHasher, LocalGuard<'_>>,
-            >(despawns_local);
-
-            Self { queue, despawns }
+            Self {
+                queue,
+                despawns: despawns_arc,
+            }
         }
     }
 }
