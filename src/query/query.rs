@@ -148,7 +148,7 @@ impl<'w, Q: QueryData, T> QueryArchetypeView<'w, Q, T> {
     ///   archetype's component data may exist simultaneously.
     #[inline(always)]
     pub unsafe fn get_fetch(&self) -> Q::Fetch {
-        self.fetch.clone()
+        self.fetch
     }
 
     /// # Safety
