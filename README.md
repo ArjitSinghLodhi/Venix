@@ -1,21 +1,16 @@
+# ⚠️ Venix is Deprecated
+
+**Venix has been succeeded by the avenix crate.**
+
+This crate remains fully functional, but active development has shifted entirely to the fresh `avenix` crate.
+
+**Reason**: Venix was my first proper crate. When I published it, I did not know about the SemVer rules and locked myself too early into the API. Therefore, `avenix` will inherit the strengths of Venix while giving me freedom to change anything anytime.
+
+***
+
 # 🦀 Venix ECS Engine
 
 A deterministic, high-concurrency Entity Component System (ECS) written in Rust, engineered for zero-overhead structural memory layouts, compile-time concurrency verification, and vectorized parallel execution pipelines.
-
----
-
-## 🔒 Production Readiness & API Blueprint
-
-Venix v3.x.x is the complete, stable baseline for the ecs. The core traits and architecture are locked down. You can build on this version without worrying about breaking changes or API churn.
-
-* **SemVer Compliance**  
-  The public API surface is stable. No unexpected signature rewrites in future updates.
-* **Vanilla Rust Data Types**  
-  Zero mandatory derive macros, procedural code generation, or structural marker traits. Your domain components stay clean, vanilla Rust structs.
-* **Zero Magic Type-System Hacks**  
-  For single component operations, a `(Component,)` is needed rather than a plain `Component` to avoid forcing derive traits on every struct. However, enabling the derive feature flag allows you to cleanly turn any struct into an unpackable component bundle.
-
----
 
 ## 🚀 Performance & Invariant Guarantees
 

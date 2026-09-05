@@ -14,6 +14,8 @@
 
 #![allow(clippy::module_inception)]
 
+#![deprecated(since = "3.1.4", note = "Use the `avenix` crate instead.")]
+
 pub mod app;
 pub mod commands;
 pub mod entity;

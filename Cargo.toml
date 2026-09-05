@@ -1,8 +1,8 @@
 [package]
 name = "venix"
-version = "3.1.3"
+version = "3.1.4"
 edition = "2024"
-description = "A high-performance, archetype-based ECS engine written in Rust."
+description = "[DEPRECATED] This engine has been succeeded by the avenix crate."
 readme = "README.md"
 repository = "https://github.com/ArjitSinghLodhi/Venix"
 license = "MIT OR Apache-2.0"
@@ -102,8 +102,8 @@ path = "examples/10_derive.rs"
 required-features = ["derive"]
 
 [[example]]
-name = "hirearchy_cleanup"
-path = "examples/despawning/hirearchy_cleanup.rs"
+name = "hierarchy_cleanup"
+path = "examples/despawning/hierarchy_cleanup.rs"
 
 [[bench]]
 name = "query_lookups_fragmented"
